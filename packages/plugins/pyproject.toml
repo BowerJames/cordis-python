@@ -1,0 +1,19 @@
+[project]
+name = "cordis-plugins"
+version = "0.1.0"
+description = "Contracts (keys and the promises behind them) and the components keeping them: an event bus and timers."
+authors = [
+    { name = "James Bower", email = "bower.james1996@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = ["cordis"]
+
+[tool.uv.sources]
+cordis = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.8.12,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "plugins"

@@ -1,0 +1,24 @@
+- case: apply_may_be_any_form_of_effect
+  main: |
+    from typing import AsyncIterator, Iterator
+    from cordis import Component, Context, Inverse
+
+    def plain(ctx: Context) -> None: ...
+    def returning(ctx: Context) -> Inverse:
+        return lambda: None
+    def stepped(ctx: Context) -> Iterator[Inverse]:
+        yield lambda: None
+    async def awaited(ctx: Context) -> Inverse:
+        return lambda: None
+    async def streamed(ctx: Context) -> AsyncIterator[Inverse]:
+        yield lambda: None
+
+    for apply in (plain, returning, stepped, awaited, streamed):
+        Component("c", apply=apply)
+
+- case: apply_takes_a_context
+  main: |
+    from cordis import Component
+
+    def wrong(value: int) -> None: ...
+    Component("c", apply=wrong)  # E: Argument "apply" to "Component" has incompatible type "Callable[[int], None]"; expected "Callable[[Context], Callable[[], Awaitable[None] | None] | Iterator[Callable[[], Awaitable[None] | None] | None] | AsyncIterator[Callable[[], Awaitable[None] | None] | None] | Awaitable[Callable[[], Awaitable[None] | None] | None] | None] | None"  [arg-type]
