@@ -1,6 +1,6 @@
 [tool.uv.workspace]
-members = ["packages/*"]
-exclude = ["packages/__pycache__"]
+members = ["packages/*", "examples/*"]
+exclude = ["packages/__pycache__", "examples/__pycache__"]
 
 [dependency-groups]
 dev = [
@@ -29,7 +29,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["cordis", "cordis_loader", "cordis_plugins", "examples"]
+known-first-party = ["cordis", "cordis_loader", "cordis_plugins", "bot", "chat", "curl", "echo", "items"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -38,15 +38,22 @@ files = [
     "packages/cordis/src", "packages/cordis/tests",
     "packages/loader/src", "packages/loader/tests",
     "packages/plugins/src", "packages/plugins/tests",
-    "packages/examples/src", "packages/examples/tests",
+    "examples/bot/src", "examples/bot/tests",
+    "examples/chat/src", "examples/chat/tests",
+    "examples/curl/src", "examples/curl/tests",
+    "examples/echo/src", "examples/echo/tests",
+    "examples/items/src", "examples/items/tests",
 ]
-mypy_path = ["packages/cordis/src", "packages/loader/src", "packages/plugins/src", "packages/examples/src"]
+mypy_path = [
+    "packages/cordis/src", "packages/loader/src", "packages/plugins/src",
+    "examples/bot/src", "examples/chat/src", "examples/curl/src", "examples/echo/src", "examples/items/src",
+]
 explicit_package_bases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["packages"]
+testpaths = ["packages", "examples"]
 timeout = 1
 # importlib keeps each package's tests package separate; typing cases share one mypy process rather than starting one
 # each. Only internal tests run by default: `pytest -m external` runs the external ones, `pytest -m ""` runs everything.

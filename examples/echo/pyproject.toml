@@ -1,0 +1,24 @@
+[project]
+name = "cordis-example-echo"
+version = "0.1.0"
+description = "An echo server: POST /echo answers with the body it was sent, beside a health check."
+authors = [
+    { name = "James Bower", email = "bower.james1996@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = ["cordis", "cordis-loader", "cordis-plugins"]
+
+[project.scripts]
+echo-server = "echo.entrypoints.echo_server:main"
+
+[tool.uv.sources]
+cordis = { workspace = true }
+cordis-loader = { workspace = true }
+cordis-plugins = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.8.12,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "echo"

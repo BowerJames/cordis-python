@@ -9,7 +9,11 @@ resolution-markers = [
 [manifest]
 members = [
     "cordis",
-    "cordis-examples",
+    "cordis-example-bot",
+    "cordis-example-chat",
+    "cordis-example-curl",
+    "cordis-example-echo",
+    "cordis-example-items",
     "cordis-loader",
     "cordis-plugins",
 ]
@@ -369,9 +373,26 @@ version = "0.1.0"
 source = { editable = "packages/cordis" }
 
 [[package]]
-name = "cordis-examples"
+name = "cordis-example-bot"
 version = "0.1.0"
-source = { editable = "packages/examples" }
+source = { editable = "examples/bot" }
+dependencies = [
+    { name = "cordis" },
+    { name = "cordis-loader" },
+    { name = "cordis-plugins" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cordis", editable = "packages/cordis" },
+    { name = "cordis-loader", editable = "packages/loader" },
+    { name = "cordis-plugins", editable = "packages/plugins" },
+]
+
+[[package]]
+name = "cordis-example-chat"
+version = "0.1.0"
+source = { editable = "examples/chat" }
 dependencies = [
     { name = "cordis" },
     { name = "cordis-loader" },
@@ -387,6 +408,57 @@ requires-dist = [
     { name = "cordis-plugins", editable = "packages/plugins" },
     { name = "pathspec", specifier = ">=1.1" },
     { name = "textual", specifier = ">=8.2.8" },
+]
+
+[[package]]
+name = "cordis-example-curl"
+version = "0.1.0"
+source = { editable = "examples/curl" }
+dependencies = [
+    { name = "cordis" },
+    { name = "cordis-loader" },
+    { name = "cordis-plugins" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cordis", editable = "packages/cordis" },
+    { name = "cordis-loader", editable = "packages/loader" },
+    { name = "cordis-plugins", editable = "packages/plugins" },
+]
+
+[[package]]
+name = "cordis-example-echo"
+version = "0.1.0"
+source = { editable = "examples/echo" }
+dependencies = [
+    { name = "cordis" },
+    { name = "cordis-loader" },
+    { name = "cordis-plugins" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cordis", editable = "packages/cordis" },
+    { name = "cordis-loader", editable = "packages/loader" },
+    { name = "cordis-plugins", editable = "packages/plugins" },
+]
+
+[[package]]
+name = "cordis-example-items"
+version = "0.1.0"
+source = { editable = "examples/items" }
+dependencies = [
+    { name = "cordis" },
+    { name = "cordis-loader" },
+    { name = "cordis-plugins" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cordis", editable = "packages/cordis" },
+    { name = "cordis-loader", editable = "packages/loader" },
+    { name = "cordis-plugins", editable = "packages/plugins" },
 ]
 
 [[package]]

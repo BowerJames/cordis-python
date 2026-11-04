@@ -21,7 +21,9 @@ A component module that imports another component, even only as a default, choos
 
 Let imports run one way. A contract module imports the kernel and other contracts. A component module imports contracts, together with the helpers that use them, which live in the contract module beside the key they serve: `serve` reaches nothing but `APPLICATION`, so it belongs to that contract, and a server serving requests imports it from there rather than from the runner. Only compositions import components.
 
-A component that instantiates another takes it as configuration rather than importing it. `server_cli(server)` instantiates whatever server it is given, once the command line has been parsed, and the site's composition gives it one:
+Lay a project out along the same line, so the direction can be read from the folders: `contracts/` holds the keys its components meet on, with the records bound at them; `components/` holds the components, each module importing from `contracts/`, from the libraries' contracts, and from plain helpers beside it; and `entrypoints/` holds a module per deliverable, building its composition and running it, the only place components are named. A project whose components keep only contracts it gets from a library has no `contracts/` of its own. Each project under `examples/` is laid out this way.
+
+A component that instantiates another takes it as configuration rather than importing it. `server_cli(server)` instantiates whatever server it is given, once the command line has been parsed, and the items project's composition gives it one:
 
 ```python
 Entry("server", server_cli, config={"server": asyncio_http_server})

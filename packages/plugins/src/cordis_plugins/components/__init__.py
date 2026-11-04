@@ -20,7 +20,7 @@ from .http_clients import (
     recording_http,
     respond,
 )
-from .http_servers import asyncio_http_server, fastapi_http_server, route_table
+from .http_servers import announce, asyncio_http_server, fastapi_http_server, health, route_table
 from .openai_sdk import openai_sdk
 from .postgres_pool import postgres_pool
 from .postgres_sql import postgres_sql
@@ -37,6 +37,7 @@ __all__ = [
     "ApplicationRun",
     "Captured",
     "Outcome",
+    "announce",
     "application",
     "argparse_cli",
     "asyncio_http_server",
@@ -47,6 +48,7 @@ __all__ = [
     "event_bus",
     "fastapi_http_server",
     "get_env_os",
+    "health",
     "http_requests",
     "httpx_http",
     "observed_client",

@@ -1,0 +1,24 @@
+[project]
+name = "cordis-example-chat"
+version = "0.1.0"
+description = "An agent chat server: an agent per websocket session, with tools over a workspace, and a terminal client."
+authors = [
+    { name = "James Bower", email = "bower.james1996@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = ["cordis", "cordis-loader", "cordis-plugins", "pathspec>=1.1", "textual>=8.2.8"]
+
+[project.scripts]
+chat-server = "chat.entrypoints.chat_server:main"
+
+[tool.uv.sources]
+cordis = { workspace = true }
+cordis-loader = { workspace = true }
+cordis-plugins = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.8.12,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "chat"

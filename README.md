@@ -25,14 +25,27 @@ does so to follow the paper. Why it is built this way is in [`pattern_language/`
 
 ## Packages
 
-This is a [uv](https://docs.astral.sh/uv/) workspace:
+This is a [uv](https://docs.astral.sh/uv/) workspace. The libraries are in `packages/`:
 
 | Package | What it holds |
 |---|---|
 | [`cordis`](packages/cordis) | The kernel, with no dependencies: keys, effects, contexts, components, fibers and the runtime. |
 | [`loader`](packages/loader) | `cordis_loader`: declarative configuration (§5.2.1), a tree of entries reconciled into fibers as it changes, and hot module replacement through those fibers (§5.2.2). |
-| [`cordis_plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an application runner, stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers. |
-| [`examples`](packages/examples) | Applications composed from them, each started from a file in `entrypoints/`: the microkernel project's echo server, curl, items site and agent chat server, rebuilt in the style of this framework, and a bot reconfigured while it runs. |
+| [`cordis_plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an application runner, stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, a health check and a server announcement, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers. |
+
+The examples are in `examples/`, each a project of its own built on those libraries, with its own `pyproject.toml`,
+scripts and tests. Each lays out its package the same way: `entrypoints/` holds a module per deliverable, each building
+a composition and running it; `components/` the components it composes; and `contracts/` the keys its components meet
+on, with the records bound at them. A project whose components keep only `cordis_plugins`' contracts has no
+`contracts/` of its own.
+
+| Project | What it is |
+|---|---|
+| [`echo`](examples/echo) | An echo server: `POST /echo` answers with the body it was sent, beside a health check. |
+| [`curl`](examples/curl) | A small curl: an HTTP client on the command line, verbose about what it sends and receives. |
+| [`items`](examples/items) | An items API with discovery, keeping its items in memory or in SQLite. |
+| [`chat`](examples/chat) | An agent chat server: an agent per websocket session, with tools over a workspace, and a terminal client. |
+| [`bot`](examples/bot) | A bot reconfigured while it runs. |
 
 ## A first composition
 
@@ -99,7 +112,7 @@ providing (`L-Leave`), lets the printer unload while the greeting is still bound
 | Algorithm 6, proxy access | `ctx.get(key)`, checked against the declaring fiber's committed view |
 | A commutative, witnessed coeffect (Def. 46) | `Entries`: each addition an entry of its own |
 
-## Configuration, and running the example
+## Configuration, and running the examples
 
 The loader keeps a tree of entries and the fibers realizing it in step:
 
@@ -109,12 +122,12 @@ from cordis_loader import Entry, Loader
 loader = Loader(runtime.root)
 await loader.load([
     Entry("events", "cordis_plugins:event_bus"),
-    Entry("features", children=[Entry("greeter", "examples.bot.components:greeter", config={"greeting": "hey"})]),
+    Entry("features", children=[Entry("greeter", "bot.components:greeter", config={"greeting": "hey"})]),
     Entry("tenant", children=[...], isolate={STORE: True}),
 ])
 print(loader.describe())          # how it fits together, building each component but running none
 await loader.load(changed)        # reconciles by id: only what the change reaches reloads
-await loader.reload(["examples.bot.components"], source_imports(["examples"]))  # hot module replacement
+await loader.reload(["bot.components.features"], source_imports(["bot"]))  # hot module replacement
 ```
 
 ```sh
@@ -134,7 +147,7 @@ The chat server reads `ZAI_API_KEY` and `OPENAI_API_KEY` from the environment, a
 
 ## The microkernel's examples, in this framework's style
 
-The four example programs of the `microkernel` project are rebuilt here, behaving the same and tested by the same
+The four example programs of the `microkernel` project are rebuilt here, as the `echo`, `curl`, `items` and `chat` projects, behaving the same and tested by the same
 tests, ported. What changes is how they are put together, since this framework composes by effects and coeffects that
 can be changed while the application runs, where the microkernel plans a fixed boot:
 

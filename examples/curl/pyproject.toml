@@ -1,0 +1,24 @@
+[project]
+name = "cordis-example-curl"
+version = "0.1.0"
+description = "A small curl: an HTTP client on the command line, verbose about what it sends and receives."
+authors = [
+    { name = "James Bower", email = "bower.james1996@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = ["cordis", "cordis-loader", "cordis-plugins"]
+
+[project.scripts]
+curl-example = "curl.entrypoints.curl:main"
+
+[tool.uv.sources]
+cordis = { workspace = true }
+cordis-loader = { workspace = true }
+cordis-plugins = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.8.12,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "curl"

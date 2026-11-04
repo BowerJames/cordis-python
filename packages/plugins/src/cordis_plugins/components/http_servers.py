@@ -21,6 +21,7 @@ from ..contracts import (
     ROUTES,
     SERVER_ADDRESS,
     STDERR,
+    STDOUT,
     GetEnv,
     Matched,
     NotAllowed,
@@ -104,6 +105,33 @@ def route_table() -> Component:
         ctx.provide(ROUTES, RouteTable(add=table.add, add_socket=table.add_socket, routes=table.routes,
                                        sockets=table.sockets, socket=table.socket, match=table.match))
     return Component("route table", apply=apply, provides=(ROUTES,))
+
+async def _healthy(request: ServerRequest) -> ServerResponse:
+    return ServerResponse.text("ok")
+
+def health() -> Component:
+    # GET /health answers ok for as long as this is loaded: the route is its one effect.
+    def apply(ctx: Context) -> None:
+        route = Route("GET", "/health", _healthy)
+        ctx.effect(lambda: ctx.get(ROUTES).add(route), f"route {route}")
+    return Component("health", apply=apply, requires=(ROUTES,))
+
+def announce() -> Component:
+    # Says where the server is once the application has started, and says when it is going away. It relies on the
+    # server, through its address, so as the application ends it is told to stop before the server is: the farewell is
+    # written while the server still serves, by the order ending follows, not by anything this component arranges.
+    def apply(ctx: Context) -> None:
+        async def announcing(stopping: asyncio.Event) -> None:
+            write = ctx.get(STDOUT)
+            write(f"listening on {ctx.get(SERVER_ADDRESS)}\n")
+            for route in sorted(ctx.get(ROUTES).routes(), key=lambda route: (route.path, route.method)):
+                write(f"  {route.method.upper():<6} {route.path}\n")
+            await stopping.wait()
+            write("shutting down\n")
+
+        serve(ctx, "announce", announcing)
+
+    return Component("announce", apply=apply, requires=(APPLICATION, SERVER_ADDRESS, ROUTES, STDOUT))
 
 def listen_on(host: str | None, port: int | None, get_env: GetEnv) -> tuple[str, int]:
     # The factory's arguments first, then the environment, then the defaults.
