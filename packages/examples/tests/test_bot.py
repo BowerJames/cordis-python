@@ -46,7 +46,7 @@ async def test_disabling_the_store_parks_only_the_counter(runtime: Runtime) -> N
     await runtime.settled()
     await loader.load([entry for entry in entries if entry.id != "store"])
     await runtime.settled()
-    say(runtime, "ada", "hi")
+    await say(runtime, "ada", "hi")
     assert lines[-2:] == ["ada: hi", "bot: hello, ada"]
     assert "  - counter requires store, which nothing provides" in loader.describe()
 

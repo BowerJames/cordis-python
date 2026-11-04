@@ -13,7 +13,7 @@ from .contracts import CHANNEL
 def configuration(lines: list[str], greeting: str = "hello", counting: bool = True) -> list[Entry]:
     components = "examples.bot.components"
     return [
-        Entry("events", "plugins.events:event_bus"),
+        Entry("events", "plugins.components.event_bus:event_bus"),
         Entry("channel", f"{components}:transcript_channel", config={"lines": lines}),
         Entry("features", children=[
             Entry("greeter", f"{components}:greeter", config={"greeting": greeting}),
@@ -22,10 +22,10 @@ def configuration(lines: list[str], greeting: str = "hello", counting: bool = Tr
         Entry("store", f"{components}:memory_store"),
     ]
 
-def say(runtime: Runtime, user: str, text: str) -> None:
+async def say(runtime: Runtime, user: str, text: str) -> None:
     channel = runtime.root.find(CHANNEL)
     assert channel is not None, "the channel is not running"
-    channel.receive(user, text)
+    await channel.receive(user, text)
 
 async def run(describe_only: bool = False) -> list[str]:
     lines: list[str] = []
@@ -35,16 +35,16 @@ async def run(describe_only: bool = False) -> list[str]:
             return loader.describe(configuration(lines)).splitlines()
         await loader.load(configuration(lines))
         await runtime.settled()
-        say(runtime, "ada", "hi")
-        say(runtime, "ada", "count")
+        await say(runtime, "ada", "hi")
+        await say(runtime, "ada", "count")
         # The greeter is revised with a new greeting; the counter is disabled, then brought back.
         await loader.load(configuration(lines, greeting="hey", counting=False))
         await runtime.settled()
-        say(runtime, "grace", "hi")
-        say(runtime, "grace", "count")
+        await say(runtime, "grace", "hi")
+        await say(runtime, "grace", "count")
         await loader.load(configuration(lines, greeting="hey"))
         await runtime.settled()
-        say(runtime, "grace", "count")
+        await say(runtime, "grace", "count")
     return lines
 
 def main(argv: Any = None) -> None:

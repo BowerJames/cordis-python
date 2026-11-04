@@ -15,7 +15,7 @@ MESSAGES: Topic[Message] = Topic("messages")
 
 class Channel:
     # Where the bot talks: receive is called by whatever delivers messages, say by whatever answers them.
-    def receive(self, user: str, text: str) -> None:
+    async def receive(self, user: str, text: str) -> None:
         raise NotImplementedError
 
     def say(self, text: str) -> None:

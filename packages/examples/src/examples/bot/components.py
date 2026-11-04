@@ -1,17 +1,22 @@
 from cordis import Component, Context, Inverse
-from plugins import EVENTS, listen
+from plugins import EVENTS, EventHandler, Topic
 
 from .contracts import CHANNEL, MESSAGES, STORE, Channel, Message, Store
 
+
+def listen[T](ctx: Context, topic: Topic[T], handler: EventHandler[T]) -> None:
+    # Subscribes for as long as ctx's fiber runs: the subscription is one of its effects. ctx's component must require
+    # EVENTS.
+    ctx.effect(lambda: ctx.get(EVENTS).subscribe(topic, handler), f"listen to {topic.name}")
 
 class _Transcript(Channel):
     def __init__(self, ctx: Context, lines: list[str]) -> None:
         self._ctx = ctx
         self._lines = lines
 
-    def receive(self, user: str, text: str) -> None:
+    async def receive(self, user: str, text: str) -> None:
         self._lines.append(f"{user}: {text}")
-        self._ctx.get(EVENTS).emit(MESSAGES, Message(user, text))
+        await self._ctx.get(EVENTS).publish(MESSAGES, Message(user, text))
 
     def say(self, text: str) -> None:
         self._lines.append(f"bot: {text}")
@@ -38,7 +43,7 @@ def memory_store() -> Component:
 def greeter(greeting: str = "hello") -> Component:
     # Answers "hi". Its greeting is configuration, bound in here, so changing it is a revision of this entry alone.
     def apply(ctx: Context) -> None:
-        def on_message(message: Message) -> None:
+        async def on_message(message: Message) -> None:
             if message.text == "hi":
                 ctx.get(CHANNEL).say(f"{greeting}, {message.user}")
         listen(ctx, MESSAGES, on_message)
@@ -48,7 +53,7 @@ def counter() -> Component:
     # Counts each user's messages and answers "count". It holds nothing itself: the count lives in the store, so
     # swapping the store is something the counter follows, not something it has to handle.
     def apply(ctx: Context) -> Inverse:
-        def on_message(message: Message) -> None:
+        async def on_message(message: Message) -> None:
             count = ctx.get(STORE).increment(message.user)
             if message.text == "count":
                 ctx.get(CHANNEL).say(f"{message.user}, that is message {count}")

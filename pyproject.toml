@@ -10,6 +10,8 @@ dev = [
     "pytest-mypy-plugins>=4.1.0",
     "mypy>=1.17",
     "ruff>=0.17,<0.18",
+    "types-requests>=2.33.0.20261006",
+    "asyncpg-stubs>=0.32.0",
 ]
 
 [tool.ruff]
