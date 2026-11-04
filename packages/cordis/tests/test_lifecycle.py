@@ -154,3 +154,25 @@ async def test_a_fiber_rests_where_its_target_says_after_any_change(runtime: Run
     assert runtime.target(consumer) is None
     await runtime.settled()
     assert runtime.quiet()
+
+async def test_transitions_are_recorded_before_they_run_even_when_tasks_start_eagerly(runtime: Runtime) -> None:
+    # A loop whose tasks start eagerly, as a running Textual app makes it, would otherwise run a whole transition inside
+    # the call recording it, leaving a finished transition recorded as in flight: the fiber could then never leave.
+    loop = asyncio.get_running_loop()
+    previous = loop.get_task_factory()
+    loop.set_task_factory(asyncio.eager_task_factory)
+    try:
+        log: list[str] = []
+
+        def group(ctx: Context) -> None:
+            ctx.use(database(log))
+            ctx.use(reader(log))
+
+        fiber = runtime.root.use(Component("group", apply=group))
+        await runtime.settled()
+        assert log == ["database up", "reader up: hello"]
+        await fiber.dispose()
+        assert log[2:] == ["reader down: hello", "database down"]
+        assert [member.name for member in runtime.fibers()] == []
+    finally:
+        loop.set_task_factory(previous)

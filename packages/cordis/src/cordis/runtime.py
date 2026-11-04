@@ -467,7 +467,10 @@ class Runtime:
     # --- waiting -------------------------------------------------------------------------------------------------
 
     def _spawn(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
-        task = asyncio.get_running_loop().create_task(coroutine)
+        # Always started lazily, whatever task factory the loop has: the runtime records a task (a transition in
+        # flight, an effect pending) before any of it runs, as Algorithm 5 does. A task started eagerly could run to the
+        # end inside this call, and leave a finished transition recorded as in flight, so the fiber could never leave.
+        task = asyncio.Task(coroutine, loop=asyncio.get_running_loop(), eager_start=False)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
