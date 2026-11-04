@@ -1,5 +1,5 @@
 from cordis import Component, Context, Inverse
-from plugins import EVENTS, EventHandler, Topic
+from cordis_plugins import EVENTS, EventHandler, Topic
 
 from .contracts import CHANNEL, MESSAGES, STORE, Channel, Message, Store
 

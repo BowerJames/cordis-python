@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterator, Mapping
 
 from cordis import Component, Context, Key
-from plugins import GET_ENV
+from cordis_plugins import GET_ENV
 
 from .contracts import INJECT, SESSION_STATE, TOOLS, WORKSPACE, StateKey, Tool, ToolSpec, Workspace
 from .ignore import hidden_by_git

@@ -29,7 +29,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["cordis", "cordis_loader", "plugins", "examples"]
+known-first-party = ["cordis", "cordis_loader", "cordis_plugins", "examples"]
 
 [tool.mypy]
 python_version = "3.12"

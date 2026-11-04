@@ -2,7 +2,7 @@ import asyncio
 
 from cordis import Component, Context, Inverse
 from cordis_loader import Entry
-from plugins import APPLICATION, ApplicationRun, describe, run_application, serve
+from cordis_plugins import APPLICATION, ApplicationRun, describe, run_application, serve
 
 
 def ender(status: int = 0, after: float = 0.01) -> Component:

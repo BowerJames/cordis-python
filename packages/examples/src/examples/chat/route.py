@@ -4,7 +4,7 @@ from typing import Sequence
 
 from cordis import Component, Context, Fiber, FiberState, Runtime
 from cordis_loader import Entry, Loader
-from plugins import APPLICATION, EVENTS, ROUTES, Socket, SocketRoute, Topic
+from cordis_plugins import APPLICATION, EVENTS, ROUTES, Socket, SocketRoute, Topic
 
 from .catalog import catalog
 from .contracts import (

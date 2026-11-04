@@ -31,4 +31,4 @@ ctx.provide(TIMER, Timer(after=timers.after, every=timers.every, pending=timers.
 
 The record carries what consumers need and nothing more; what only the keeper uses stays on its own object, as `ApplicationRun` keeps starting the run, stopping what is served and the status it ended with. Being frozen, the record cannot be changed by those holding it (One Context).
 
-State the promises a second time, as tests. Each contract's tests are parametrised over a list of the components keeping it and reach the value through `plugins.testing.provided`, never through a keeper's class, so a new keeper adds itself to the list and is held to what the others are (`test_sql.py`, `test_events.py`).
+State the promises a second time, as tests. Each contract's tests are parametrised over a list of the components keeping it and reach the value through `cordis_plugins.testing.provided`, never through a keeper's class, so a new keeper adds itself to the list and is held to what the others are (`test_sql.py`, `test_events.py`).

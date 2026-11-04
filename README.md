@@ -31,7 +31,7 @@ This is a [uv](https://docs.astral.sh/uv/) workspace:
 |---|---|
 | [`cordis`](packages/cordis) | The kernel, with no dependencies: keys, effects, contexts, components, fibers and the runtime. |
 | [`loader`](packages/loader) | `cordis_loader`: declarative configuration (§5.2.1), a tree of entries reconciled into fibers as it changes, and hot module replacement through those fibers (§5.2.2). |
-| [`plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an application runner, stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers. |
+| [`cordis_plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an application runner, stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers. |
 | [`examples`](packages/examples) | Applications composed from them, each started from a file in `entrypoints/`: the microkernel project's echo server, curl, items site and agent chat server, rebuilt in the style of this framework, and a bot reconfigured while it runs. |
 
 ## A first composition
@@ -108,7 +108,7 @@ from cordis_loader import Entry, Loader
 
 loader = Loader(runtime.root)
 await loader.load([
-    Entry("events", "plugins.events:event_bus"),
+    Entry("events", "cordis_plugins:event_bus"),
     Entry("features", children=[Entry("greeter", "examples.bot.components:greeter", config={"greeting": "hey"})]),
     Entry("tenant", children=[...], isolate={STORE: True}),
 ])

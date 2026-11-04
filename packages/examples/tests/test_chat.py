@@ -8,10 +8,7 @@ import pytest
 
 from cordis import Component, Context
 from cordis_loader import Entry, patched, without
-from examples.chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, ToolCall, Turn
-from examples.chat.tools import workspace
-from examples.entrypoints.chat_server import compose, with_a_session
-from plugins import (
+from cordis_plugins import (
     APPLICATION,
     ROUTES,
     SERVER_ADDRESS,
@@ -23,6 +20,9 @@ from plugins import (
     run_application,
     serve,
 )
+from examples.chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, ToolCall, Turn
+from examples.chat.tools import workspace
+from examples.entrypoints.chat_server import compose, with_a_session
 
 
 class Client:

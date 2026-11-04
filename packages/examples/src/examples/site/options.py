@@ -1,7 +1,7 @@
 from typing import Any, Callable
 
 from cordis import Component, Context
-from plugins import APPLICATION, ARGS, CLI, ROUTES, STDOUT, Argument, option, switch
+from cordis_plugins import APPLICATION, ARGS, CLI, ROUTES, STDOUT, Argument, option, switch
 
 
 def port_number(text: str) -> int:

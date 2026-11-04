@@ -7,9 +7,7 @@ import pytest
 
 from cordis import Component, Context
 from cordis_loader import Entry, patched
-from examples.curl import curl as curl_component
-from examples.entrypoints.curl import compose, run
-from plugins import (
+from cordis_plugins import (
     HTTP,
     Answer,
     Captured,
@@ -22,6 +20,8 @@ from plugins import (
     recording_http,
     respond,
 )
+from examples.curl import curl as curl_component
+from examples.entrypoints.curl import compose, run
 
 
 async def curl(argv: list[str], answer: Answer, terminal: bool = False) -> tuple[int, Captured, list[Request]]:

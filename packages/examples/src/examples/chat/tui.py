@@ -15,7 +15,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from cordis import Component, Context
-from plugins import APPLICATION, SERVER_ADDRESS, serve
+from cordis_plugins import APPLICATION, SERVER_ADDRESS, serve
 
 from .contracts import AGENT_TYPES, PROVIDERS
 

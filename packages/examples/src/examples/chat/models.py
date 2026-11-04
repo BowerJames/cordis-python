@@ -16,7 +16,7 @@ from openai.types.responses import (
 )
 
 from cordis import Component, Context, Inverse
-from plugins import GET_ENV, OPENAI_CLIENTS, STDERR, GetEnv
+from cordis_plugins import GET_ENV, OPENAI_CLIENTS, STDERR, GetEnv
 
 from .contracts import (
     CONNECTION,

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
 from cordis import Inverse, Key
-from plugins import Socket, Topic
+from cordis_plugins import Socket, Topic
 
 
 # What a session is opened with: the query of /ws/chat.

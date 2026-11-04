@@ -2,7 +2,7 @@ import asyncio
 from typing import Any
 
 from cordis import Component, Context
-from plugins import (
+from cordis_plugins import (
     APPLICATION,
     ARGS,
     CLI,

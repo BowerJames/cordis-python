@@ -1,7 +1,7 @@
 import asyncio
 
 from cordis import Component, Context
-from plugins import (
+from cordis_plugins import (
     APPLICATION,
     ROUTES,
     SERVER_ADDRESS,

@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 
 from cordis_loader import Entry
+from cordis_plugins import environment, run_application
 from examples.chat.ignore import hidden_by_git
 from examples.chat.tools import workspace
-from plugins import environment, run_application
 
 
 def files(root: Path, contents: dict[str, str]) -> Path:

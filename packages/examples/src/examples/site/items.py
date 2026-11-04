@@ -2,7 +2,7 @@ import json
 from typing import AsyncIterator
 
 from cordis import Component, Context, Inverse
-from plugins import ROUTES, SERVER_ADDRESS, SQL, Route, ServerRequest, ServerResponse
+from cordis_plugins import ROUTES, SERVER_ADDRESS, SQL, Route, ServerRequest, ServerResponse
 
 from .contracts import ITEMS, Item, Items
 

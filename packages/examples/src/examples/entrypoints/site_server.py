@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from cordis_loader import Entry, patched
-from examples.site import discovery, items_api, items_store, routes_command, server_cli, sql_items_store
-from plugins import (
+from cordis_plugins import (
     UsageError,
     argparse_cli,
     asyncio_http_server,
@@ -19,6 +18,7 @@ from plugins import (
     sqlite_sql,
     stdio,
 )
+from examples.site import discovery, items_api, items_store, routes_command, server_cli, sql_items_store
 
 
 def compose(argv: Sequence[str] | None = None, database: str | Path | None = None) -> list[Entry]:

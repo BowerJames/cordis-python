@@ -4,9 +4,7 @@ import pytest
 
 from cordis import Context
 from cordis_loader import Entry, patched
-from examples.echo import echo, health
-from examples.entrypoints.echo_server import Server, compose, run
-from plugins import (
+from cordis_plugins import (
     HTTP,
     ROUTES,
     SERVER_ADDRESS,
@@ -18,7 +16,9 @@ from plugins import (
     httpx_http,
     route_table,
 )
-from plugins.testing import Steps, scenario
+from cordis_plugins.testing import Steps, scenario
+from examples.echo import echo, health
+from examples.entrypoints.echo_server import Server, compose, run
 
 
 @pytest.fixture(params=["asyncio", "fastapi"])

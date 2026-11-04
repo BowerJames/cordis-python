@@ -5,7 +5,7 @@ import pytest
 
 from cordis import Component, Context
 from cordis_loader import Entry
-from plugins import (
+from cordis_plugins import (
     HTTP,
     ROUTES,
     SERVER_ADDRESS,
@@ -25,7 +25,7 @@ from plugins import (
     respond,
     route_table,
 )
-from plugins.testing import run_scenario
+from cordis_plugins.testing import run_scenario
 
 
 async def test_every_exchange_is_shown_to_each_observer_and_observers_withdraw_independently() -> None:
@@ -107,7 +107,7 @@ async def test_a_request_that_takes_longer_than_its_timeout_raises_http_timeout(
     assert [error for _, error in outcome.failures if isinstance(error, HTTPError)] == []
 
 def test_the_timeout_comes_from_the_environment_when_requests_do_not_say() -> None:
-    from plugins import default_timeout
+    from cordis_plugins import default_timeout
     assert default_timeout(lambda name: "2.5") == 2.5
     with pytest.raises(ValueError, match="more than zero"):
         default_timeout(lambda name: "0")

@@ -4,7 +4,7 @@ from contextlib import suppress
 from typing import Any, Awaitable
 
 from cordis import Component, Context
-from plugins import APPLICATION, serve
+from cordis_plugins import APPLICATION, serve
 
 from .contracts import (
     AGENT_TYPES,

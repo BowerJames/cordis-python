@@ -9,7 +9,7 @@ import pytest
 
 from cordis import Component, Context
 from cordis_loader import Entry
-from plugins import (
+from cordis_plugins import (
     APPLICATION,
     SQL,
     ConstraintViolation,

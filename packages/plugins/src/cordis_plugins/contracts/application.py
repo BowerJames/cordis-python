@@ -6,7 +6,7 @@ from cordis import Context, Effect, Fiber, Inverse, Key
 
 # An application is a composition that runs until it is done: until something ends it, until a failure ends it, or
 # until nothing holds it open any more. Cordis itself only loads and unloads; this is the run around that, kept by a
-# runner (plugins.components.application keeps one) and offered to the components through APPLICATION. What only the
+# runner (cordis_plugins.components.application keeps one) and offered to the components through APPLICATION. What only the
 # runner needs, such as starting the run and stopping what is served, is the runner's own and not part of this.
 #
 # Promises:

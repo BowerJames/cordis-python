@@ -13,7 +13,7 @@ from .contracts import CHANNEL
 def configuration(lines: list[str], greeting: str = "hello", counting: bool = True) -> list[Entry]:
     components = "examples.bot.components"
     return [
-        Entry("events", "plugins.components.event_bus:event_bus"),
+        Entry("events", "cordis_plugins.components.event_bus:event_bus"),
         Entry("channel", f"{components}:transcript_channel", config={"lines": lines}),
         Entry("features", children=[
             Entry("greeter", f"{components}:greeter", config={"greeting": greeting}),

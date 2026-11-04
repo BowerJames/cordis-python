@@ -4,7 +4,7 @@ from typing import Callable
 import pytest
 
 from cordis import Component, Context, Runtime
-from plugins import (
+from cordis_plugins import (
     GET_ENV,
     STDERR,
     STDOUT,

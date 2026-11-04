@@ -4,8 +4,8 @@ import sys
 from typing import Sequence
 
 from cordis_loader import Entry
+from cordis_plugins import UsageError, argparse_cli, get_env_os, httpx_http, run_application, stdio
 from examples.curl import Abandoned, curl, verbose
-from plugins import UsageError, argparse_cli, get_env_os, httpx_http, run_application, stdio
 
 
 def compose(argv: Sequence[str] | None = None) -> list[Entry]:

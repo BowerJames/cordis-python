@@ -4,8 +4,8 @@ from typing import AsyncIterator
 
 import pytest
 
-from plugins import EVENTS, Events, Topic, event_bus
-from plugins.testing import provided
+from cordis_plugins import EVENTS, Events, Topic, event_bus
+from cordis_plugins.testing import provided
 
 PINGS: Topic[str] = Topic("pings")
 

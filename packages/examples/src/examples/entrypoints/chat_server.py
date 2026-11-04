@@ -12,6 +12,16 @@ from typing import Sequence
 
 from cordis import Component, Context
 from cordis_loader import Entry, patched
+from cordis_plugins import (
+    describe,
+    event_bus,
+    fastapi_http_server,
+    get_env_os,
+    openai_sdk,
+    route_table,
+    run_application,
+    stdio,
+)
 from examples.chat import (
     chat,
     explorer,
@@ -30,16 +40,6 @@ from examples.chat import (
 from examples.chat.contracts import CONNECTION, SESSION_KEYS, TOOLS
 from examples.chat.tui import tui
 from examples.echo import announce, health
-from plugins import (
-    describe,
-    event_bus,
-    fastapi_http_server,
-    get_env_os,
-    openai_sdk,
-    route_table,
-    run_application,
-    stdio,
-)
 
 
 def session() -> list[Entry]:

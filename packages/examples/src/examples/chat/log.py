@@ -1,5 +1,5 @@
 from cordis import Component, Context
-from plugins import EVENTS, STDOUT
+from cordis_plugins import EVENTS, STDOUT
 
 from .contracts import SESSION_CLOSED, SESSION_OPENED, SessionClosed, SessionOpened
 

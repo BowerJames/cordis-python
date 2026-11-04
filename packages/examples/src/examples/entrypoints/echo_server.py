@@ -6,8 +6,7 @@ import sys
 from typing import Literal
 
 from cordis_loader import Entry
-from examples.echo import announce, echo, health
-from plugins import (
+from cordis_plugins import (
     Outcome,
     asyncio_http_server,
     describe,
@@ -17,6 +16,7 @@ from plugins import (
     run_application,
     stdio,
 )
+from examples.echo import announce, echo, health
 
 Server = Literal["asyncio", "fastapi"]
 

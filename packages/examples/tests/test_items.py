@@ -7,9 +7,9 @@ import pytest
 
 from cordis import Context
 from cordis_loader import Entry
+from cordis_plugins import SQL, Sql, get_env_os, postgres_pool, postgres_sql, sqlite_database, sqlite_sql
+from cordis_plugins.testing import run_scenario
 from examples.site import ITEMS, Item, Items, items_store, sql_items_store
-from plugins import SQL, Sql, get_env_os, postgres_pool, postgres_sql, sqlite_database, sqlite_sql
-from plugins.testing import run_scenario
 
 STORES: dict[str, Callable[[Path], list[Entry]]] = {
     "in memory": lambda directory: [Entry("items", items_store)],

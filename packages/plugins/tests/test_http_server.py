@@ -5,7 +5,7 @@ import pytest
 
 from cordis import Component, Context
 from cordis_loader import Entry, Loader, patched
-from plugins import (
+from cordis_plugins import (
     HTTP,
     ROUTES,
     SERVER_ADDRESS,
@@ -22,7 +22,7 @@ from plugins import (
     httpx_http,
     route_table,
 )
-from plugins.testing import provided, run_scenario
+from cordis_plugins.testing import provided, run_scenario
 
 pytestmark = pytest.mark.external
 

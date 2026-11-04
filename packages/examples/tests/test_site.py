@@ -8,8 +8,7 @@ import pytest
 
 from cordis import Component, Context
 from cordis_loader import Entry, patched
-from examples.entrypoints.site_server import compose, run
-from plugins import (
+from cordis_plugins import (
     HTTP,
     SERVER_ADDRESS,
     STDERR,
@@ -22,7 +21,8 @@ from plugins import (
     describe,
     httpx_http,
 )
-from plugins.testing import Steps, scenario
+from cordis_plugins.testing import Steps, scenario
+from examples.entrypoints.site_server import compose, run
 
 
 def accepting(address: str) -> bool:

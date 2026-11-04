@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from cordis import Key
-from plugins import Topic
+from cordis_plugins import Topic
 
 # The keys and topics the bot's components meet on. They live in a module of their own, which changes rarely, so
 # reloading any component leaves every key with the identity the running components already resolved.

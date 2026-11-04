@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import dataclass
 
 from cordis import Component, Context
-from plugins import APPLICATION, ROUTES, SERVER_ADDRESS, STDOUT, Route, ServerRequest, ServerResponse, serve
+from cordis_plugins import APPLICATION, ROUTES, SERVER_ADDRESS, STDOUT, Route, ServerRequest, ServerResponse, serve
 
 
 @dataclass(slots=True)
