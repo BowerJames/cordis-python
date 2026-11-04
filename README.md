@@ -147,7 +147,8 @@ The [justfile](justfile) runs the same entrypoints by name, passing on any argum
 `just items-server`, `just chat-server`, `just chat-tui` and `just bot`; `just` alone lists them.
 
 The chat server reads `ZAI_API_KEY` and `OPENAI_API_KEY` from the environment, and its tools look in
-`WORKSPACE_ROOT`, or the current directory, never at what git ignores there.
+`WORKSPACE_ROOT`, or the current directory, never at what git ignores there. `just chat-server` and `just chat-tui` load
+`examples/chat/.env` into its environment first, when there is one; a variable already set in the shell keeps its value.
 
 ## The microkernel's examples, in this framework's style
 
