@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from email.message import Message
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable
 
 from cordis import Inverse, Key
 
@@ -58,8 +58,10 @@ class HTTPConnectionError(HTTPError):
 # Shown each exchange: the request made, and its response or the error it failed with.
 type Observer = Callable[[Request, Response | HTTPError], None]
 
-class HTTPClient(Protocol):
-    def send(self, request: Request, /) -> Awaitable[Response]: ...
-    def observe(self, observer: Observer, /) -> Inverse: ...
+@dataclass(slots=True, frozen=True)
+class HTTPClient:
+    send: Callable[[Request], Awaitable[Response]]
+    # Shows observer every exchange from now on, until the inverse is applied.
+    observe: Callable[[Observer], Inverse]
 
 HTTP: Key[HTTPClient] = Key("http")

@@ -2,7 +2,7 @@ import asyncio
 
 from cordis import Component, Context, Inverse
 from cordis_loader import Entry
-from plugins import APPLICATION, Application, describe, run_application, serve
+from plugins import APPLICATION, ApplicationRun, describe, run_application, serve
 
 
 def ender(status: int = 0, after: float = 0.01) -> Component:
@@ -88,7 +88,7 @@ async def test_a_contained_failure_goes_to_its_handler_and_the_application_runs_
     assert contained == ["only this part fails in part"]
 
 async def test_started_callbacks_run_once_everything_has_settled() -> None:
-    app = Application()
+    app = ApplicationRun()
     seen: list[str] = []
     app.when_started(lambda: seen.append("first"))
     app.when_started(lambda: seen.append("second"))

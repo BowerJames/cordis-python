@@ -9,7 +9,7 @@ def listen[T](ctx: Context, topic: Topic[T], handler: EventHandler[T]) -> None:
     # EVENTS.
     ctx.effect(lambda: ctx.get(EVENTS).subscribe(topic, handler), f"listen to {topic.name}")
 
-class _Transcript(Channel):
+class _Transcript:
     def __init__(self, ctx: Context, lines: list[str]) -> None:
         self._ctx = ctx
         self._lines = lines
@@ -24,10 +24,11 @@ class _Transcript(Channel):
 def transcript_channel(lines: list[str]) -> Component:
     # A channel that writes everything said into lines, in place of a real chat platform.
     def apply(ctx: Context) -> None:
-        ctx.provide(CHANNEL, _Transcript(ctx, lines))
+        transcript = _Transcript(ctx, lines)
+        ctx.provide(CHANNEL, Channel(receive=transcript.receive, say=transcript.say))
     return Component("transcript channel", apply=apply, requires=(EVENTS,), provides=(CHANNEL,))
 
-class _Memory(Store):
+class _Memory:
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}
 
@@ -37,7 +38,8 @@ class _Memory(Store):
 
 def memory_store() -> Component:
     def apply(ctx: Context) -> None:
-        ctx.provide(STORE, _Memory())
+        memory = _Memory()
+        ctx.provide(STORE, Store(increment=memory.increment))
     return Component("memory store", apply=apply, provides=(STORE,))
 
 def greeter(greeting: str = "hello") -> Component:

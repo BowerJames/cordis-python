@@ -1,4 +1,5 @@
 import asyncio
+from typing import Callable
 
 import pytest
 
@@ -48,14 +49,20 @@ async def test_the_environment_is_the_process_or_what_is_given(runtime: Runtime,
     given = runtime.root.find(GET_ENV)
     assert given is not None and (given("ONLY"), given("CORDIS_TEST_VARIABLE")) == ("this", None)
 
-async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(runtime: Runtime) -> None:
+# The timer contract, run against every component keeping it.
+TIMERS = [timer]
+
+@pytest.mark.parametrize("keeper", TIMERS, ids=lambda keeper: keeper.__name__)
+async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(
+    runtime: Runtime, keeper: Callable[[], Component],
+) -> None:
     fired: list[str] = []
 
     def apply(ctx: Context) -> None:
         ctx.effect(lambda: ctx.get(TIMER).after(0.01, lambda: fired.append("late")))
         ctx.effect(lambda: ctx.get(TIMER).after(0, lambda: fired.append("soon")))
 
-    runtime.root.use(timer())
+    runtime.root.use(keeper())
     fiber = runtime.root.use(Component("waiter", apply=apply, requires=(TIMER,)))
     await runtime.settled()
     await asyncio.sleep(0.001)
@@ -63,9 +70,10 @@ async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(runt
     await asyncio.sleep(0.02)
     assert fired == ["soon"]
 
-async def test_an_interval_repeats_until_cancelled(runtime: Runtime) -> None:
+@pytest.mark.parametrize("keeper", TIMERS, ids=lambda keeper: keeper.__name__)
+async def test_an_interval_repeats_until_cancelled(runtime: Runtime, keeper: Callable[[], Component]) -> None:
     ticks: list[int] = []
-    runtime.root.use(timer())
+    runtime.root.use(keeper())
     await runtime.settled()
     timers = runtime.root.find(TIMER)
     assert timers is not None
@@ -76,4 +84,4 @@ async def test_an_interval_repeats_until_cancelled(runtime: Runtime) -> None:
     count = len(ticks)
     await asyncio.sleep(0.01)
     assert len(ticks) == count
-    assert len(timers) == 0
+    assert timers.pending() == 0

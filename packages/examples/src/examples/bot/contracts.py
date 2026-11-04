@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 from cordis import Key
 from plugins import Topic
@@ -13,19 +14,18 @@ class Message:
 
 MESSAGES: Topic[Message] = Topic("messages")
 
+@dataclass(slots=True, frozen=True)
 class Channel:
-    # Where the bot talks: receive is called by whatever delivers messages, say by whatever answers them.
-    async def receive(self, user: str, text: str) -> None:
-        raise NotImplementedError
-
-    def say(self, text: str) -> None:
-        raise NotImplementedError
+    # Where the bot talks: receive is called by whatever delivers messages, with the user and their text; say by
+    # whatever answers them.
+    receive: Callable[[str, str], Awaitable[None]]
+    say: Callable[[str], None]
 
 CHANNEL: Key[Channel] = Key("channel")
 
+@dataclass(slots=True, frozen=True)
 class Store:
-    # A counter per name, kept wherever the provider keeps it.
-    def increment(self, name: str) -> int:
-        raise NotImplementedError
+    # A counter per name, kept wherever the provider keeps it: increment counts one more, and gives the count.
+    increment: Callable[[str], int]
 
 STORE: Key[Store] = Key("store")

@@ -180,7 +180,7 @@ def tui(path: str = "/ws/chat", provider: str | None = None, model_name: str = "
     def apply(ctx: Context) -> None:
         async def run(stopping: asyncio.Event) -> None:
             address = ctx.get(SERVER_ADDRESS).replace("http://", "ws://", 1)
-            app = ChatApp(f"{address}{path}", providers=ctx.get(PROVIDERS).names, agent_types=ctx.get(AGENT_TYPES).names,
+            app = ChatApp(f"{address}{path}", providers=ctx.get(PROVIDERS).names(), agent_types=ctx.get(AGENT_TYPES).names(),
                           provider=provider, model_name=model_name, agent_type=agent_type)
             running = asyncio.ensure_future(app.run_async())
             ending = asyncio.ensure_future(stopping.wait())

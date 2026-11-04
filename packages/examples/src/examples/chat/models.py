@@ -47,7 +47,7 @@ def model() -> Component:
         provider = ctx.get(PROVIDERS).get(request.provider)
         if provider is None:
             raise LookupError(f"no provider is called {request.provider}; "
-                              f"there are {', '.join(sorted(ctx.get(PROVIDERS).names))}")
+                              f"there are {', '.join(sorted(ctx.get(PROVIDERS).names()))}")
         held = AsyncExitStack()
         respond = await held.enter_async_context(provider.connect(request.model_name))
         yield held.aclose

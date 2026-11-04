@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Mapping
 
-from cordis import Entries, Inverse, Key
+from cordis import Inverse, Key
 
 from .http import Headers
 
@@ -93,66 +93,20 @@ class Matched:
 class NotAllowed:
     allowed: tuple[str, ...]
 
+@dataclass(slots=True, frozen=True)
 class RouteTable:
     # The value bound at ROUTES. Adding a route is an entry of its own, withdrawn by the inverse add returns, so
     # contributors come and go independently; two routes answering the same method and path are refused, as is a
     # path not starting with /, by add raising ValueError, which fails the contributor that tried.
-    __slots__ = ("_routes", "_sockets")
-
-    def __init__(self) -> None:
-        self._routes: Entries[Route] = Entries()
-        self._sockets: Entries[SocketRoute] = Entries()
-
-    def add(self, route: Route) -> Inverse:
-        if not route.path.startswith("/"):
-            raise ValueError(f"route {route} must start with /")
-        if any((other.method.upper(), other.path) == (route.method.upper(), route.path) for other in self._routes):
-            raise ValueError(f"two routes answer {route}")
-        return self._routes.add(route)
-
-    def add_socket(self, route: SocketRoute) -> Inverse:
-        if not route.path.startswith("/"):
-            raise ValueError(f"socket route {route.path} must start with /")
-        if any(other.path == route.path for other in self._sockets):
-            raise ValueError(f"two socket routes answer {route.path}")
-        return self._sockets.add(route)
-
-    @property
-    def routes(self) -> tuple[Route, ...]:
-        return tuple(self._routes)
-
-    @property
-    def sockets(self) -> tuple[SocketRoute, ...]:
-        return tuple(self._sockets)
-
-    def socket(self, path: str) -> SocketRoute | None:
-        return next((route for route in self._sockets if route.path == path), None)
-
-    def match(self, method: str, path: str) -> Matched | NotAllowed | None:
-        # None when no route has this path; NotAllowed when some do, but not for this method.
-        wanted = path.split("/")
-        allowed: list[str] = []
-        for route in self._routes:
-            params = _params(route.path.split("/"), wanted)
-            if params is None:
-                continue
-            if route.method.upper() == method.upper():
-                return Matched(route=route, params=params)
-            allowed.append(route.method.upper())
-        return NotAllowed(allowed=tuple(sorted(set(allowed)))) if allowed else None
-
-def _params(pattern: list[str], wanted: list[str]) -> dict[str, str] | None:
-    if len(pattern) != len(wanted):
-        return None
-    params: dict[str, str] = {}
-    for expected, given in zip(pattern, wanted):
-        if expected.startswith("{") and expected.endswith("}"):
-            if not given:
-                return None
-            params[expected[1:-1]] = given
-        elif expected != given:
-            return None
-    return params
+    add: Callable[[Route], Inverse]
+    add_socket: Callable[[SocketRoute], Inverse]
+    # Every route in the table now, in the order they were added.
+    routes: Callable[[], tuple[Route, ...]]
+    sockets: Callable[[], tuple[SocketRoute, ...]]
+    # The socket route answering an exact path, if any.
+    socket: Callable[[str], SocketRoute | None]
+    # None when no route has this path; NotAllowed when some do, but not for this method.
+    match: Callable[[str, str], Matched | NotAllowed | None]
 
 ROUTES: Key[RouteTable] = Key("routes")
 # Where the server listens, as a base URL such as http://127.0.0.1:8000.

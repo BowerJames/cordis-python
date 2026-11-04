@@ -44,7 +44,7 @@ def routes_command() -> Component:
         if not ctx.get(ARGS)(LIST_ROUTES):
             return
         write = ctx.get(STDOUT)
-        for route in sorted(ctx.get(ROUTES).routes, key=lambda route: (route.path, route.method)):
+        for route in sorted(ctx.get(ROUTES).routes(), key=lambda route: (route.path, route.method)):
             write(f"{route.method.upper():<6} {route.path}\n")
         ctx.get(APPLICATION).end(0)
 

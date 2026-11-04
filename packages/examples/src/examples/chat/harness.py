@@ -54,7 +54,7 @@ def harness() -> Component:
             profile = ctx.get(AGENT_TYPES).get(request.agent_type)
             if profile is None:
                 raise LookupError(f"no agent type is called {request.agent_type}; "
-                                  f"there are {', '.join(ctx.get(AGENT_TYPES).names)}")
+                                  f"there are {', '.join(ctx.get(AGENT_TYPES).names())}")
             offered = ctx.get(TOOLS)
             unknown = [name for name in profile.tools if offered.get(name) is None]
             if unknown:

@@ -1,7 +1,7 @@
-import asyncio
-from typing import Any, Awaitable, Callable
+from dataclasses import dataclass
+from typing import Awaitable, Callable, Protocol
 
-from cordis import Entries, Inverse, Key
+from cordis import Inverse, Key
 
 # Every event bus keeps these promises: publish calls every handler subscribed to the topic, concurrently, and returns
 # once they have all returned; a topic with no handlers returns at once. A handler that raises never stops the others:
@@ -22,37 +22,15 @@ class Topic[T]:
     def __repr__(self) -> str:
         return f"Topic({self.name!r})"
 
-def _named(handler: EventHandler[Any]) -> str:
-    return getattr(handler, "__qualname__", None) or repr(handler)
+class Subscribe(Protocol):
+    def __call__[T](self, topic: Topic[T], handler: EventHandler[T], /) -> Inverse: ...
 
+class Publish(Protocol):
+    def __call__[T](self, topic: Topic[T], event: T, /) -> Awaitable[None]: ...
+
+@dataclass(slots=True, frozen=True)
 class Events:
-    __slots__ = ("_topics",)
-
-    def __init__(self) -> None:
-        self._topics: dict[Topic[Any], Entries[EventHandler[Any]]] = {}
-
-    def subscribe[T](self, topic: Topic[T], handler: EventHandler[T]) -> Inverse:
-        return self._topics.setdefault(topic, Entries()).add(handler)
-
-    async def publish[T](self, topic: Topic[T], event: T) -> None:
-        called: tuple[EventHandler[T], ...] = tuple(self._topics.get(topic, ()))
-        if not called:
-            return
-
-        async def deliver(handler: EventHandler[T]) -> None:
-            # Awaited in a coroutine of its own, so a handler that raises before it returns an awaitable still fails
-            # alone.
-            await handler(event)
-
-        results = await asyncio.gather(*(deliver(handler) for handler in called), return_exceptions=True)
-        failures: list[Exception] = []
-        for handler, result in zip(called, results):
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, Exception):
-                result.add_note(f"in handler {_named(handler)} of topic {topic.name}")
-                failures.append(result)
-        if failures:
-            raise ExceptionGroup(f"handlers of {topic.name} failed", failures)
+    subscribe: Subscribe
+    publish: Publish
 
 EVENTS: Key[Events] = Key("events")

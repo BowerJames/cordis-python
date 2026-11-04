@@ -39,10 +39,11 @@ def repeated[T](name: str, flags: tuple[str, ...], help: str, parse: Callable[[s
 def switch(name: str, flags: tuple[str, ...], help: str) -> Argument[bool]:
     return Argument(name=name, kind="switch", flags=flags, help=help, parse=str)
 
-class Arguments(Protocol):
+@dataclass(slots=True, frozen=True)
+class Arguments:
     # The value bound at CLI: add registers an argument until the inverse it returns is applied. Each registration is
     # an entry of its own, so registrations from different components are independent of each other.
-    def add(self, argument: Argument[Any], /) -> Inverse: ...
+    add: Callable[[Argument[Any]], Inverse]
 
 class ReadArgument(Protocol):
     # Looks up the value of an argument: args(URL) -> str.

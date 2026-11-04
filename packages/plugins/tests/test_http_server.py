@@ -1,5 +1,5 @@
 # The server contract, kept by both servers, over real sockets: each test runs against each provider.
-from typing import Any
+from typing import Any, AsyncIterator
 
 import pytest
 
@@ -22,7 +22,7 @@ from plugins import (
     httpx_http,
     route_table,
 )
-from plugins.testing import run_scenario
+from plugins.testing import provided, run_scenario
 
 pytestmark = pytest.mark.external
 
@@ -125,17 +125,21 @@ async def test_swapping_the_server_leaves_every_route_where_it_is() -> None:
     outcome = await run_scenario(entries, steps, requires=(HTTP,))
     assert outcome.failures == ()
 
-def test_two_routes_answering_the_same_method_and_path_are_refused() -> None:
-    table = RouteTable()
+@pytest.fixture(params=[route_table], ids=lambda keeper: keeper.__name__)
+async def table(request: pytest.FixtureRequest) -> AsyncIterator[RouteTable]:
+    # The route table contract, run against every component keeping it, through the contract alone.
+    async with provided(ROUTES, request.param) as kept:
+        yield kept
+
+async def test_two_routes_answering_the_same_method_and_path_are_refused(table: RouteTable) -> None:
     table.add(Route("GET", "/a", greet))
     with pytest.raises(ValueError, match="two routes answer GET /a"):
         table.add(Route("get", "/a", greet))
     with pytest.raises(ValueError, match="must start with /"):
         table.add(Route("GET", "a", greet))
 
-def test_withdrawn_routes_free_their_method_and_path() -> None:
-    table = RouteTable()
+async def test_withdrawn_routes_free_their_method_and_path(table: RouteTable) -> None:
     withdraw = table.add(Route("GET", "/a", greet))
     withdraw()
     table.add(Route("GET", "/a", greet))
-    assert [str(route) for route in table.routes] == ["GET /a"]
+    assert [str(route) for route in table.routes()] == ["GET /a"]

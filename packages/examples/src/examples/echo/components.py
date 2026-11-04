@@ -42,7 +42,7 @@ def announce() -> Component:
         async def announcing(stopping: asyncio.Event) -> None:
             write = ctx.get(STDOUT)
             write(f"listening on {ctx.get(SERVER_ADDRESS)}\n")
-            for route in sorted(ctx.get(ROUTES).routes, key=lambda route: (route.path, route.method)):
+            for route in sorted(ctx.get(ROUTES).routes(), key=lambda route: (route.path, route.method)):
                 write(f"  {route.method.upper():<6} {route.path}\n")
             await stopping.wait()
             write("shutting down\n")

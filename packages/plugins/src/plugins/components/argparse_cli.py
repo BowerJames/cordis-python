@@ -4,7 +4,7 @@ from typing import Any, NoReturn, Sequence
 
 from cordis import Component, Context, Entries, Inverse
 
-from ..contracts import APPLICATION, ARGS, CLI, STDERR, STDOUT, Argument, UsageError
+from ..contracts import APPLICATION, ARGS, CLI, STDERR, STDOUT, Argument, Arguments, UsageError
 
 
 class _Parser(argparse.ArgumentParser):
@@ -53,7 +53,7 @@ def argparse_cli(argv: Sequence[str] | None = None, prog: str | None = None) -> 
     # application; given a command line that does not match, it prints the usage and ends it with status 2.
     def apply(ctx: Context) -> None:
         arguments = _Arguments()
-        ctx.provide(CLI, arguments)
+        ctx.provide(CLI, Arguments(add=arguments.add))
         app = ctx.get(APPLICATION)
         given = list(sys.argv[1:] if argv is None else argv)
 

@@ -2,12 +2,11 @@ import asyncio
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Generic, Iterator, Mapping, TypeVar
+from typing import Any, Awaitable, Callable, Mapping, Protocol
 
-from cordis import Entries, Inverse, Key
+from cordis import Inverse, Key
 from plugins import Socket, Topic
 
-T = TypeVar("T")
 
 # What a session is opened with: the query of /ws/chat.
 @dataclass(slots=True, frozen=True)
@@ -83,29 +82,16 @@ class AgentProfile:
     tools: tuple[str, ...]
     max_steps: int = 20
 
-class Catalog(Generic[T]):
+@dataclass(slots=True, frozen=True)
+class Catalog[T]:
     # Things on offer, each by a name: providers, agent types, a session's tools. Offering is an entry of its own,
-    # withdrawn by the inverse offer returns, so whatever offers comes and goes without disturbing the rest.
-    __slots__ = ("_entries", "_name")
-
-    def __init__(self, name: Callable[[T], str]) -> None:
-        self._name = name
-        self._entries: Entries[T] = Entries()
-
-    def offer(self, item: T) -> Inverse:
-        if self._name(item) in self.names:
-            raise ValueError(f"{self._name(item)} is already on offer")
-        return self._entries.add(item)
-
-    @property
-    def names(self) -> tuple[str, ...]:
-        return tuple(self._name(item) for item in self._entries)
-
-    def get(self, name: str) -> T | None:
-        return next((item for item in self._entries if self._name(item) == name), None)
-
-    def __iter__(self) -> Iterator[T]:
-        return iter(self._entries)
+    # withdrawn by the inverse offer returns, so whatever offers comes and goes without disturbing the rest; offering
+    # a name already on offer raises ValueError.
+    offer: Callable[[T], Inverse]
+    # Every name on offer now, in the order they were offered.
+    names: Callable[[], tuple[str, ...]]
+    # What is on offer by a name, or None.
+    get: Callable[[str], T | None]
 
 @dataclass(slots=True, frozen=True, eq=False)
 class StateKey[V]:
@@ -113,19 +99,18 @@ class StateKey[V]:
     name: str
     initial: Callable[[], V]
 
-@dataclass(slots=True)
+class ReadState(Protocol):
+    # The value kept at key, which starts as key.initial() the first time it is read.
+    def __call__[V](self, key: StateKey[V], /) -> V: ...
+
+class WriteState(Protocol):
+    def __call__[V](self, key: StateKey[V], value: V, /) -> None: ...
+
+@dataclass(slots=True, frozen=True)
 class SessionState:
     # What tools keep between executions, for as long as the session lasts.
-    values: dict[StateKey[Any], Any] = field(default_factory=dict)
-
-    def get[V](self, key: StateKey[V]) -> V:
-        if key not in self.values:
-            self.values[key] = key.initial()
-        value: V = self.values[key]
-        return value
-
-    def set[V](self, key: StateKey[V], value: V) -> None:
-        self.values[key] = value
+    get: ReadState
+    set: WriteState
 
 @dataclass(slots=True)
 class Connection:

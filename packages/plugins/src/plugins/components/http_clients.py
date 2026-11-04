@@ -11,6 +11,7 @@ from ..contracts import (
     HTTP,
     GetEnv,
     Headers,
+    HTTPClient,
     HTTPConnectionError,
     HTTPError,
     HTTPTimeout,
@@ -35,8 +36,8 @@ def default_timeout(get_env: GetEnv | None) -> float:
         raise ValueError(f"{HTTP_TIMEOUT_VARIABLE} must be more than zero, not {configured!r}")
     return seconds
 
-class ObservedClient:
-    # The value every provider binds at HTTP: its own way of sending, shown to every observer after each exchange.
+class _Observed:
+    # A provider's own way of sending, shown to every observer after each exchange.
     __slots__ = ("_observers", "_send")
 
     def __init__(self, send: Callable[[Request], Awaitable[Response]]) -> None:
@@ -56,6 +57,11 @@ class ObservedClient:
 
     def observe(self, observer: Observer, /) -> Inverse:
         return self._observers.add(observer)
+
+def observed_client(send: Callable[[Request], Awaitable[Response]]) -> HTTPClient:
+    # The value every provider binds at HTTP: send, with the observing the contract promises around it.
+    client = _Observed(send)
+    return HTTPClient(send=client.send, observe=client.observe)
 
 def httpx_http() -> Component:
     # Sends requests with httpx's async client: bounded by a timeout, and cancelled the moment its caller is. The
@@ -84,7 +90,7 @@ def httpx_http() -> Component:
             return Response(status=answer.status_code, reason=answer.reason_phrase,
                             headers=tuple(answer.headers.multi_items()), body=answer.content, sent=sent)
 
-        ctx.provide(HTTP, ObservedClient(send))
+        ctx.provide(HTTP, observed_client(send))
 
     return Component("httpx http", apply=apply, requires=(GET_ENV,), provides=(HTTP,))
 
@@ -131,7 +137,7 @@ def http_requests() -> Component:
             except TimeoutError as error:
                 raise HTTPTimeout(f"no response within {timeout}s") from error
 
-        ctx.provide(HTTP, ObservedClient(send))
+        ctx.provide(HTTP, observed_client(send))
         return session.close
 
     return Component("http requests", apply=apply, requires=(GET_ENV,), provides=(HTTP,))
@@ -155,6 +161,6 @@ def recording_http(answer: Answer) -> tuple[Callable[[], Component], list[Reques
         return answer(made)
 
     def apply(ctx: Context) -> None:
-        ctx.provide(HTTP, ObservedClient(send))
+        ctx.provide(HTTP, observed_client(send))
 
     return lambda: Component("recording http", apply=apply, provides=(HTTP,)), sent

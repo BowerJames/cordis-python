@@ -6,6 +6,7 @@ from cordis import Component, Context, Fiber, FiberState, Runtime
 from cordis_loader import Entry, Loader
 from plugins import APPLICATION, EVENTS, ROUTES, Socket, SocketRoute, Topic
 
+from .catalog import catalog
 from .contracts import (
     AGENT_TYPES,
     CONNECTION,
@@ -43,8 +44,8 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
     sessions = count(1)
 
     def apply(ctx: Context) -> None:
-        providers: Catalog[Provider] = Catalog(lambda provider: provider.name)
-        agent_types: Catalog[AgentProfile] = Catalog(lambda profile: profile.slug)
+        providers: Catalog[Provider] = catalog(lambda provider: provider.name)
+        agent_types: Catalog[AgentProfile] = catalog(lambda profile: profile.slug)
         ctx.provide(PROVIDERS, providers)
         ctx.provide(AGENT_TYPES, agent_types)
         app = ctx.get(APPLICATION)
@@ -61,7 +62,8 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
 
             async def open_session(group: Context) -> None:
                 group.provide(CONNECTION, connection)
-                group.provide(TOOLS, Catalog[Tool](lambda tool: tool.spec.name))
+                tools: Catalog[Tool] = catalog(lambda tool: tool.spec.name)
+                group.provide(TOOLS, tools)
                 await Loader(group).load(session)
 
             fiber = scoped.use(Component(f"session {connection.number}", apply=open_session,
@@ -102,8 +104,8 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
             unknown = [
                 f"no {kind} is called {asked}; there are {', '.join(sorted(offered))}"
                 for kind, asked, offered in (
-                    ("provider", request.provider, providers.names),
-                    ("agent type", request.agent_type, agent_types.names),
+                    ("provider", request.provider, providers.names()),
+                    ("agent type", request.agent_type, agent_types.names()),
                 )
                 if asked not in offered
             ]

@@ -14,11 +14,11 @@ from plugins import (
     Answer,
     Captured,
     HTTPConnectionError,
-    ObservedClient,
     Request,
     Response,
     capturing_stdio,
     describe,
+    observed_client,
     recording_http,
     respond,
 )
@@ -180,7 +180,7 @@ def never_answers() -> Component:
         raise AssertionError("never answered")
 
     def apply(ctx: Context) -> None:
-        ctx.provide(HTTP, ObservedClient(request))
+        ctx.provide(HTTP, observed_client(request))
     return Component("never answers", apply=apply, provides=(HTTP,))
 
 async def test_ctrl_c_gives_up_the_request_at_once_and_exits_130(capsys: pytest.CaptureFixture[str]) -> None:

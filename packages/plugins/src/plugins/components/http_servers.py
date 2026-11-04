@@ -13,7 +13,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from cordis import Component, Context, Inverse
+from cordis import Component, Context, Entries, Inverse
 
 from ..contracts import (
     APPLICATION,
@@ -22,11 +22,14 @@ from ..contracts import (
     SERVER_ADDRESS,
     STDERR,
     GetEnv,
+    Matched,
     NotAllowed,
+    Route,
     RouteTable,
     ServerRequest,
     ServerResponse,
     Socket,
+    SocketRoute,
     serve,
 )
 
@@ -37,10 +40,69 @@ HTTP_HOST_VARIABLE = "HTTP_HOST"
 HTTP_PORT_VARIABLE = "HTTP_PORT"
 MAX_HEADER_BYTES = 65_536
 
+class _Routes:
+    # Every route and socket route an entry of its own.
+    __slots__ = ("_routes", "_sockets")
+
+    def __init__(self) -> None:
+        self._routes: Entries[Route] = Entries()
+        self._sockets: Entries[SocketRoute] = Entries()
+
+    def add(self, route: Route) -> Inverse:
+        if not route.path.startswith("/"):
+            raise ValueError(f"route {route} must start with /")
+        if any((other.method.upper(), other.path) == (route.method.upper(), route.path) for other in self._routes):
+            raise ValueError(f"two routes answer {route}")
+        return self._routes.add(route)
+
+    def add_socket(self, route: SocketRoute) -> Inverse:
+        if not route.path.startswith("/"):
+            raise ValueError(f"socket route {route.path} must start with /")
+        if any(other.path == route.path for other in self._sockets):
+            raise ValueError(f"two socket routes answer {route.path}")
+        return self._sockets.add(route)
+
+    def routes(self) -> tuple[Route, ...]:
+        return tuple(self._routes)
+
+    def sockets(self) -> tuple[SocketRoute, ...]:
+        return tuple(self._sockets)
+
+    def socket(self, path: str) -> SocketRoute | None:
+        return next((route for route in self._sockets if route.path == path), None)
+
+    def match(self, method: str, path: str) -> Matched | NotAllowed | None:
+        # None when no route has this path; NotAllowed when some do, but not for this method.
+        wanted = path.split("/")
+        allowed: list[str] = []
+        for route in self._routes:
+            params = _params(route.path.split("/"), wanted)
+            if params is None:
+                continue
+            if route.method.upper() == method.upper():
+                return Matched(route=route, params=params)
+            allowed.append(route.method.upper())
+        return NotAllowed(allowed=tuple(sorted(set(allowed)))) if allowed else None
+
+def _params(pattern: list[str], wanted: list[str]) -> dict[str, str] | None:
+    if len(pattern) != len(wanted):
+        return None
+    params: dict[str, str] = {}
+    for expected, given in zip(pattern, wanted):
+        if expected.startswith("{") and expected.endswith("}"):
+            if not given:
+                return None
+            params[expected[1:-1]] = given
+        elif expected != given:
+            return None
+    return params
+
 def route_table() -> Component:
     # The routes, for contributors to add to and servers to answer from; neither requires the other.
     def apply(ctx: Context) -> None:
-        ctx.provide(ROUTES, RouteTable())
+        table = _Routes()
+        ctx.provide(ROUTES, RouteTable(add=table.add, add_socket=table.add_socket, routes=table.routes,
+                                       sockets=table.sockets, socket=table.socket, match=table.match))
     return Component("route table", apply=apply, provides=(ROUTES,))
 
 def listen_on(host: str | None, port: int | None, get_env: GetEnv) -> tuple[str, int]:
