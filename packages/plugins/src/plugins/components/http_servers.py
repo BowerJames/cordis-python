@@ -27,8 +27,8 @@ from ..contracts import (
     ServerRequest,
     ServerResponse,
     Socket,
+    serve,
 )
-from .application import serve
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000

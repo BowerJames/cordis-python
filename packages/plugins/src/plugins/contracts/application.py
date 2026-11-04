@@ -1,7 +1,7 @@
 import asyncio
-from typing import Callable
+from typing import Awaitable, Callable
 
-from cordis import Entries, Fiber, Inverse, Key
+from cordis import Context, Effect, Entries, Fiber, Inverse, Key
 
 # An application is a composition that runs until it is done: until something ends it, until a failure ends it, or
 # until nothing holds it open any more. Cordis itself only loads and unloads; this is the run around that, kept by the
@@ -120,3 +120,54 @@ class Application:
         changed.set()
 
 APPLICATION: Key[Application] = Key("application")
+
+# Work that runs for a while, such as a server accepting connections: told to stop by the event it is given, and
+# expected to return soon after.
+type Work = Callable[[asyncio.Event], Awaitable[None]]
+
+def serve(ctx: Context, label: str, work: Work, *, after_start: bool = True) -> Effect:
+    # Runs work as a task owned by ctx's fiber, holding the application open while it runs. It is an effect, so
+    # unloading the fiber stops the work: its event is set, it is given the application's grace to finish, and it is
+    # cancelled after that. Work that raises fails the application, or whatever contains ctx's fiber. ctx's component
+    # must require APPLICATION. Unless told otherwise, the work waits for the application to start before it runs.
+    fiber = ctx.fiber
+
+    def start() -> Inverse:
+        app = ctx.get(APPLICATION)
+        stopping = asyncio.Event()
+        release = app.hold(label)
+
+        async def running() -> None:
+            try:
+                if after_start:
+                    started = asyncio.ensure_future(app.started.wait())
+                    stopped = asyncio.ensure_future(stopping.wait())
+                    try:
+                        await asyncio.wait({started, stopped}, return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        started.cancel()
+                        stopped.cancel()
+                    if stopping.is_set():
+                        return
+                await work(stopping)
+            except asyncio.CancelledError:
+                pass  # cancelled after its grace ran out; the stop that did so has reported nothing more to say
+            except Exception as error:  # noqa: BLE001 - reported where the work belongs; cancellation passes
+                app.fail(error, label, fiber)
+            finally:
+                release()
+
+        task = asyncio.get_running_loop().create_task(running(), name=label)
+        withdraw = app.service(fiber, stopping, task)
+        task.add_done_callback(lambda _: withdraw())
+
+        async def stop() -> None:
+            stopping.set()
+            done, _ = await asyncio.wait({task}, timeout=app.grace)
+            if not done:
+                task.cancel()
+                await asyncio.wait({task})
+
+        return stop
+
+    return ctx.effect(start, f"serve {label}")

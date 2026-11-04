@@ -4,8 +4,8 @@ from typing import Any, Awaitable, Callable, Sequence
 from cordis import Component, Context, Key
 from cordis_loader import Entry, patched
 
-from .components import Outcome, run_application, serve
-from .contracts import APPLICATION
+from .components import Outcome, run_application
+from .contracts import APPLICATION, serve
 
 # For testing compositions as they run: a component that, once the application has started, runs steps with the ctx it
 # was given, then ends the application. Whatever the steps need, the component requires, so it starts only once that

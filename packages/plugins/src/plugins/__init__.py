@@ -8,7 +8,6 @@ from .components import (
     Captured,
     ObservedClient,
     Outcome,
-    Work,
     application,
     argparse_cli,
     asyncio_http_server,
@@ -28,7 +27,6 @@ from .components import (
     respond,
     route_table,
     run_application,
-    serve,
     sqlite_database,
     sqlite_sql,
     stdio,
@@ -94,10 +92,12 @@ from .contracts import (
     Timer,
     Topic,
     UsageError,
+    Work,
     Write,
     option,
     positional,
     repeated,
+    serve,
     switch,
 )
 

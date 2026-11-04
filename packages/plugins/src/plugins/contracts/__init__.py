@@ -1,4 +1,4 @@
-from .application import APPLICATION, Application
+from .application import APPLICATION, Application, Work, serve
 from .cli import ARGS, CLI, Argument, Arguments, ReadArgument, UsageError, option, positional, repeated, switch
 from .events import EVENTS, EventHandler, Events, Topic
 from .get_env import GET_ENV, GetEnv
@@ -42,6 +42,6 @@ __all__ = [
     "GetEnv", "HTTPClient", "HTTPConnectionError", "HTTPError", "HTTPTimeout", "Handler", "Headers", "IsTerminal",
     "Matched", "NotAllowed", "Observer", "OpenAIClients", "Parameters", "PostgresPool", "ReadArgument", "Request",
     "Response", "Route", "RouteTable", "Row", "ServerRequest", "ServerResponse", "Socket", "SocketHandler",
-    "SocketRoute", "Sql", "SqlError", "SqliteDatabase", "SqliteRun", "Timer", "Topic", "UsageError", "Write",
-    "option", "positional", "repeated", "switch",
+    "SocketRoute", "Sql", "SqlError", "SqliteDatabase", "SqliteRun", "Timer", "Topic", "UsageError", "Work", "Write",
+    "option", "positional", "repeated", "serve", "switch",
 ]

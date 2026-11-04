@@ -1,7 +1,7 @@
 from typing import Any, Callable
 
 from cordis import Component, Context
-from plugins import APPLICATION, ARGS, CLI, ROUTES, STDOUT, Argument, asyncio_http_server, option, switch
+from plugins import APPLICATION, ARGS, CLI, ROUTES, STDOUT, Argument, option, switch
 
 
 def port_number(text: str) -> int:
@@ -21,10 +21,11 @@ def _arguments(ctx: Context, *arguments: Argument[Any]) -> None:
 def _register(ctx: Context, argument: Argument[Any]) -> None:
     ctx.effect(lambda: ctx.get(CLI).add(argument), f"argument {argument.name}")
 
-def server_cli(server: Callable[..., Component] = asyncio_http_server) -> Component:
+def server_cli(server: Callable[..., Component]) -> Component:
     # The server's command-line options, in one component. Once they are parsed it instantiates the server with them
     # bound into its configuration: the server knows nothing of a command line, and it is the server's parent, so it
-    # leaves with it. A run that only lists the routes serves nothing, so it never binds a port.
+    # leaves with it. Which server is the composition's choice, given as server. A run that only lists the routes
+    # serves nothing, so it never binds a port.
     def with_arguments(ctx: Context) -> None:
         args = ctx.get(ARGS)
         if not args(LIST_ROUTES):

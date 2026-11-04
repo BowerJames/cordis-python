@@ -1,11 +1,9 @@
 from .application import (
     APPLICATION_ENTRY,
     Outcome,
-    Work,
     application,
     describe,
     run_application,
-    serve,
     with_application,
 )
 from .argparse_cli import argparse_cli
@@ -38,7 +36,6 @@ __all__ = [
     "Captured",
     "ObservedClient",
     "Outcome",
-    "Work",
     "application",
     "argparse_cli",
     "asyncio_http_server",
@@ -58,7 +55,6 @@ __all__ = [
     "respond",
     "route_table",
     "run_application",
-    "serve",
     "sqlite_database",
     "sqlite_sql",
     "stdio",

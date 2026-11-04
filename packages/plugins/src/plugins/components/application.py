@@ -2,17 +2,14 @@ import asyncio
 import signal
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence
+from typing import Sequence
 
-from cordis import Component, Context, Effect, Fiber, Inverse, Runtime, open_runtime
+from cordis import Component, Context, Fiber, Runtime, open_runtime
 from cordis_loader import Entry, Loader
 from cordis_loader import describe as describe_entries
 
 from ..contracts import APPLICATION, Application
 
-# Work that runs for a while, such as a server accepting connections: told to stop by the event it is given, and
-# expected to return soon after.
-type Work = Callable[[asyncio.Event], Awaitable[None]]
 
 def application(app: Application) -> Component:
     def apply(ctx: Context) -> None:
@@ -28,53 +25,6 @@ def with_application(entries: Sequence[Entry], app: Application) -> list[Entry]:
 def describe(entries: Sequence[Entry]) -> str:
     # How an application's entries fit together, as run_application would load them, without loading or running any.
     return describe_entries(with_application(entries, Application()))
-
-def serve(ctx: Context, label: str, work: Work, *, after_start: bool = True) -> Effect:
-    # Runs work as a task owned by ctx's fiber, holding the application open while it runs. It is an effect, so
-    # unloading the fiber stops the work: its event is set, it is given the application's grace to finish, and it is
-    # cancelled after that. Work that raises fails the application, or whatever contains ctx's fiber. ctx's component
-    # must require APPLICATION. Unless told otherwise, the work waits for the application to start before it runs.
-    fiber = ctx.fiber
-
-    def start() -> Inverse:
-        app = ctx.get(APPLICATION)
-        stopping = asyncio.Event()
-        release = app.hold(label)
-
-        async def running() -> None:
-            try:
-                if after_start:
-                    started = asyncio.ensure_future(app.started.wait())
-                    stopped = asyncio.ensure_future(stopping.wait())
-                    try:
-                        await asyncio.wait({started, stopped}, return_when=asyncio.FIRST_COMPLETED)
-                    finally:
-                        started.cancel()
-                        stopped.cancel()
-                    if stopping.is_set():
-                        return
-                await work(stopping)
-            except asyncio.CancelledError:
-                pass  # cancelled after its grace ran out; the stop that did so has reported nothing more to say
-            except Exception as error:  # noqa: BLE001 - reported where the work belongs; cancellation passes
-                app.fail(error, label, fiber)
-            finally:
-                release()
-
-        task = asyncio.get_running_loop().create_task(running(), name=label)
-        withdraw = app.service(fiber, stopping, task)
-        task.add_done_callback(lambda _: withdraw())
-
-        async def stop() -> None:
-            stopping.set()
-            done, _ = await asyncio.wait({task}, timeout=app.grace)
-            if not done:
-                task.cancel()
-                await asyncio.wait({task})
-
-        return stop
-
-    return ctx.effect(start, f"serve {label}")
 
 @dataclass(slots=True, frozen=True)
 class Outcome:

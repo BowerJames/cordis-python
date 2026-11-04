@@ -11,6 +11,7 @@ from examples.site import discovery, items_api, items_store, routes_command, ser
 from plugins import (
     UsageError,
     argparse_cli,
+    asyncio_http_server,
     get_env_os,
     route_table,
     run_application,
@@ -26,7 +27,7 @@ def compose(argv: Sequence[str] | None = None, database: str | Path | None = Non
         Entry("env", get_env_os),
         Entry("cli", argparse_cli, config={"argv": argv, "prog": "site"}),
         Entry("routes", route_table),
-        Entry("server", server_cli),
+        Entry("server", server_cli, config={"server": asyncio_http_server}),
         Entry("routes-command", routes_command),
         Entry("items", items_store),
         Entry("items-api", items_api),
