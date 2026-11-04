@@ -9,7 +9,8 @@ requires-python = ">=3.12"
 dependencies = ["cordis", "cordis-loader", "cordis-plugins", "pathspec>=1.1", "textual>=8.2.8"]
 
 [project.scripts]
-chat-server = "chat.entrypoints.chat_server:main"
+chat-server = "chat.entrypoints.server:main"
+chat-tui = "chat.entrypoints.tui:main"
 
 [tool.uv.sources]
 cordis = { workspace = true }

@@ -8,7 +8,8 @@ import pytest
 
 from chat.components import workspace
 from chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, ToolCall, Turn
-from chat.entrypoints.chat_server import compose, with_a_session
+from chat.entrypoints import tui
+from chat.entrypoints.server import compose, with_a_session
 from cordis import Component, Context
 from cordis_loader import Entry, patched, without
 from cordis_plugins import (
@@ -143,7 +144,8 @@ def test_describe_shows_what_loads_in_each_session_and_what_is_on_offer() -> Non
 def test_chat_only_uses_an_event_bus_and_the_terminal_client_goes_without_the_session_log() -> None:
     from chat.components import chat
     assert "events" not in {key.name for key in chat(session=[]).requires}
-    assert "session-log" not in describe(compose(log_sessions=False))
+    described = describe(tui.compose())
+    assert "tui" in described and "session-log" not in described
 
 async def test_chat_works_the_same_without_an_event_bus(root: Path) -> None:
     replies = [AssistantMessage("hello")]

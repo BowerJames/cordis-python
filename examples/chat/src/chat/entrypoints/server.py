@@ -1,9 +1,8 @@
 # An agent chat server: `uv run chat-server`, then connect a websocket to
 # ws://127.0.0.1:8000/ws/chat?provider=zai&model_name=glm-5.1&agent_type=explorer and send a message.
 # Keys come from OPENAI_API_KEY and ZAI_API_KEY; tools look in WORKSPACE_ROOT, or the current directory.
-# Each session is logged on stdout as it opens and closes.
-# `uv run chat-server --tui` also runs a terminal client of the server, until it is quit with ctrl+q; sessions are not
-# logged then, as the client has the terminal.
+# Each session is logged on stdout as it opens and closes. `uv run chat-tui` runs the same server with a terminal
+# client of its own.
 # `uv run chat-server --describe` shows how it fits together, application and session, without starting it.
 import argparse
 import asyncio
@@ -25,7 +24,6 @@ from chat.components import (
     workspace,
     zai_coding_plan,
 )
-from chat.components.tui import tui
 from chat.contracts import CONNECTION, SESSION_KEYS, TOOLS
 from cordis import Component, Context
 from cordis_loader import Entry, patched
@@ -84,27 +82,20 @@ def with_a_session(entries: list[Entry], sessions: list[Entry] | None = None) ->
     return [*entries, Entry("each-session", children=[opening, *(sessions if sessions is not None else session())],
                             isolate={key: True for key in SESSION_KEYS})]
 
-async def run(entries: list[Entry]) -> int:
+async def run(entries: list[Entry], prog: str = "chat-server") -> int:
     outcome = await run_application(entries)
     for _, error in outcome.failures:
         notes = "; ".join(getattr(error, "__notes__", []))
-        sys.stderr.write(f"chat-server: {error}" + (f" ({notes})" if notes else "") + "\n")
+        sys.stderr.write(f"{prog}: {error}" + (f" ({notes})" if notes else "") + "\n")
     return outcome.status
 
 def main(argv: Sequence[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="chat-server", description="An agent chat server, with a terminal client if asked.")
+    parser = argparse.ArgumentParser(prog="chat-server", description="An agent chat server.")
     parser.add_argument("--describe", action="store_true", help="show how it fits together, without starting it")
     parser.add_argument("--port", type=int, help="the port to serve on (default 8000, or HTTP_PORT)")
-    parser.add_argument("--tui", action="store_true", help="also run a terminal client; quitting it stops the server")
-    parser.add_argument("--provider", help="the provider the terminal client starts with")
-    parser.add_argument("--model", default="", help="the model name the terminal client starts with")
-    parser.add_argument("--agent-type", help="the agent type the terminal client starts with")
     arguments = parser.parse_args(argv)
 
-    entries = compose(port=arguments.port, log_sessions=not arguments.tui)
-    if arguments.tui:
-        entries = patched(entries, Entry("tui", tui, config={"provider": arguments.provider, "model_name": arguments.model,
-                                                             "agent_type": arguments.agent_type}))
+    entries = compose(port=arguments.port)
     if arguments.describe:
         print(describe(with_a_session(entries)))
         return

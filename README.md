@@ -137,10 +137,14 @@ uv run echo-server                    # an echo server; ECHO_SERVER=fastapi serv
 uv run curl-example http://127.0.0.1:8000/echo -d hello -v
 uv run site-example --port 8080       # an items API; SITE_DATABASE=site.sqlite keeps items in SQLite
 uv run site-example --routes          # the route table, without binding a port
-uv run chat-server                    # an agent per websocket session; --tui adds a terminal client
+uv run chat-server                    # an agent per websocket session
 uv run chat-server --describe         # how it fits together, application and a session, without starting it
+uv run chat-tui                       # the same server, with a terminal client of its own
 uv run bot-example                    # a conversation, with the configuration changed twice while it runs
 ```
+
+The [justfile](justfile) runs the same entrypoints by name, passing on any arguments: `just echo-server`, `just curl`,
+`just items-server`, `just chat-server`, `just chat-tui` and `just bot`; `just` alone lists them.
 
 The chat server reads `ZAI_API_KEY` and `OPENAI_API_KEY` from the environment, and its tools look in
 `WORKSPACE_ROOT`, or the current directory, never at what git ignores there.
