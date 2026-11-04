@@ -28,8 +28,8 @@ This is a [uv](https://docs.astral.sh/uv/) workspace:
 |---|---|
 | [`cordis`](packages/cordis) | The kernel, with no dependencies: keys, effects, contexts, components, fibers and the runtime. |
 | [`loader`](packages/loader) | `cordis_loader`: declarative configuration (§5.2.1), a tree of entries reconciled into fibers as it changes, and hot module replacement through those fibers (§5.2.2). |
-| [`plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an event bus and timers. |
-| [`examples`](packages/examples) | Applications composed from them: a bot reconfigured while it runs. |
+| [`plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an application runner, stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers. |
+| [`examples`](packages/examples) | Applications composed from them, each started from a file in `entrypoints/`: the microkernel project's echo server, curl, items site and agent chat server, rebuilt in the style of this framework, and a bot reconfigured while it runs. |
 
 ## A first composition
 
@@ -115,16 +115,48 @@ await loader.reload(["examples.bot.components"], source_imports(["examples"]))  
 ```
 
 ```sh
-uv run bot-example                # a conversation, with the configuration changed twice while it runs
-uv run bot-example --describe     # how it fits together, without starting it
+uv sync
+
+uv run echo-server                    # an echo server; ECHO_SERVER=fastapi serves it with FastAPI instead
+uv run curl-example http://127.0.0.1:8000/echo -d hello -v
+uv run site-example --port 8080       # an items API; SITE_DATABASE=site.sqlite keeps items in SQLite
+uv run site-example --routes          # the route table, without binding a port
+uv run chat-server                    # an agent per websocket session; --tui adds a terminal client
+uv run chat-server --describe         # how it fits together, application and a session, without starting it
+uv run bot-example                    # a conversation, with the configuration changed twice while it runs
 ```
+
+The chat server reads `ZAI_API_KEY` and `OPENAI_API_KEY` from the environment, and its tools look in
+`WORKSPACE_ROOT`, or the current directory, never at what git ignores there.
+
+## The microkernel's examples, in this framework's style
+
+The four example programs of the `microkernel` project are rebuilt here, behaving the same and tested by the same
+tests, ported. What changes is how they are put together, since this framework composes by effects and coeffects that
+can be changed while the application runs, where the microkernel plans a fixed boot:
+
+| microkernel | here |
+|---|---|
+| `kernel.register(...)`, `kernel.replace(TOKEN, plugin)` | a list of `Entry`s with stable ids; `patched(entries, Entry(id, ...))` swaps one, at runtime too through `Loader.load` |
+| `kernel.describe()` | `describe(entries)`: the order a load from scratch activates them in, and why, without running anything |
+| a capability introduced by one plugin | a key provided by one component |
+| a slot, contributed before boot and collected | a key whose value is a table, each addition its own entry and its own effect (`RouteTable`, `Catalog`, `Arguments`, `Events`) |
+| adapting a capability (`verbose` wrapping the HTTP requester) | observing it: `HTTP.observe` is a registration of its own, so it needs no place in any order |
+| `server_cli` adapting the environment for the server | `server_cli` instantiating the server once the command line is parsed, with host and port bound into it |
+| services, `END`, `STARTED`, `kernel.run()` | `run_application(entries)`: `serve(ctx, label, work)` for running work, `APPLICATION.end`, `when_started`; ending stops served work in dependency order, then unloads everything |
+| a scope opened per websocket connection | a session group whose session keys are isolated into realms of its own; its failures are contained to it |
+
+Some behaviour comes from the framework rather than from the examples: routes live in their own table, so a server
+can be swapped while running without any route noticing, and a route withdrawn is answered 404 from the next request;
+two servers are kept apart by isolating their keys, with nothing to wire; discovery deregisters while the server still
+accepts because it relies on the server's address, not because anything orders it.
 
 ## Tests and checks
 
 ```sh
 uv sync
 uv run pytest                 # internal tests only
-uv run pytest -m external     # the typing cases, which run mypy
+uv run pytest -m external     # the external ones: real sockets, real servers, mypy
 uv run pytest -m ""           # everything
 uv run mypy                   # strict, over sources and tests
 uv run ruff check
@@ -144,3 +176,6 @@ replace real modules written to a temporary package, including a failed import t
 - A failed fiber is not retried until it is revised (§4.4); `fiber.revise()` is that revision.
 - Hot module replacement invalidates only the modules on a way from an entry to a change, rather than the entry's
   whole import tree: a key's identity is the object its module made, and Python cannot re-make it equal.
+
+The Postgres tests need a server they may do anything to. They use the one `TEST_POSTGRES_DSN` names, or start a
+throwaway `postgres:17-alpine` in Docker, and skip when there is neither.
