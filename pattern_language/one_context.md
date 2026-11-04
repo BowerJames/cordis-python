@@ -20,6 +20,8 @@ A runtime can only revert the changes it can see, and only follow the dependenci
 
 Give every component exactly one way to touch the world: its `Context`. What it reads it declares in `requires` and reads with `ctx.get`; what it shares it declares in `provides` and installs with `ctx.provide`; anything else it changes it changes inside `ctx.effect`, returning the undo; anything it loads it loads with `ctx.use`. This is the paper's context paradigm (§3.3): a component's behaviour is built from those stages alone (Definitions 30 and 56), and confinement follows from that form (Lemma 57).
 
+What a component provides is frozen (Contracts Are Records), so it changes only by being withdrawn and provided anew. That is the only change its dependents could follow: the runtime follows which fiber provides a key, not what the binding holds (§5.1.3), so a binding overwritten in place would never reach them.
+
 When something shared has no key, give it one. A module-level cache becomes a component providing a cache key; a counter drawn from a global becomes a value bound at a key of its own. The test for the discipline is the paper's: unload the component and observe that nothing it did remains.
 
 Some things never come inside. Writing bytes to a socket or a shared file is an emission that no inverse can take back (§6.1); acquire the channel as an effect, and treat what goes through it as irreversible.

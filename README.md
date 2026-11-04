@@ -17,8 +17,11 @@ rules this runtime implements directly. Where the design here departs from Cordi
 does so to follow the paper. Why it is built this way is in [`pattern_language/`](pattern_language):
 [One Context](pattern_language/one_context.md), [Every Act Carries Its Undo](pattern_language/revertible_effects.md),
 [Wait, Don't Fail](pattern_language/reactive_coeffects.md),
-[Every Registration Gets Its Own Ticket](pattern_language/commutative_keys.md) and
-[Configuration is the Truth](pattern_language/configuration_is_the_truth.md).
+[Every Registration Gets Its Own Ticket](pattern_language/commutative_keys.md),
+[Configuration is the Truth](pattern_language/configuration_is_the_truth.md),
+[Contracts Are Records](pattern_language/contracts_are_records.md),
+[Only Compositions Name Components](pattern_language/only_compositions_name_components.md) and
+[Realms, Not Wiring](pattern_language/realms_not_wiring.md).
 
 ## Packages
 
