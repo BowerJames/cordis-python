@@ -480,9 +480,24 @@ class Runtime:
         while not condition():
             await self._changed.wait()
 
-    async def settled(self) -> None:
+    async def settled(self, under: Fiber | None = None) -> None:
         # Waits until no transition or effect is in flight; with acyclic dependencies that is quiescence (Theorem 73).
-        while pending := {task for task in self._tasks if not task.done()}:
+        # Given a fiber, waits only for it and what it instantiated, so an orchestrator of one subtree, such as a
+        # session, is not held up by the rest of the system.
+        if under is None:
+            while pending := {task for task in self._tasks if not task.done()}:
+                await asyncio.wait(pending)
+            return
+
+        def subtree(fiber: Fiber) -> list[Fiber]:
+            return [fiber, *(member for child in self.children(fiber) for member in subtree(child))]
+
+        while True:
+            members = subtree(under)
+            pending = {task for fiber in members for task in (fiber.inertia, *fiber.pending)
+                       if task is not None and not task.done()}
+            if not pending:
+                return
             await asyncio.wait(pending)
 
     async def close(self) -> None:

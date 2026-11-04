@@ -1,7 +1,8 @@
 from typing import Any, Callable, Collection, Iterator, Sequence
 
 from cordis import Component, Context, Fiber, FiberState, Inverse, Key, Metadata, Realm, RealmId
-from cordis.describe import Declared, describe
+from cordis.describe import Declared
+from cordis.describe import describe as describe_declared
 
 from .entry import ComponentFactory, Entry, import_factory
 from .hmr import Imports, RestartRequired, classify, invalidate, restore, stale
@@ -28,6 +29,11 @@ class _Node:
 
 def _effectful(ctx: Context) -> bool:
     return ctx.fiber.state in (FiberState.LOADING, FiberState.ACTIVE) and not ctx.fiber.removed
+
+def describe(entries: Sequence[Entry]) -> str:
+    # How entries fit together, from a runtime made only to hold the description: nothing is loaded or run.
+    from cordis import Runtime
+    return Loader(Runtime().root).describe(entries)
 
 class Loader:
     # Keeps a tree of entries and the fibers realizing it in step (Section 5.2.1). The configuration is the authority:
@@ -80,7 +86,7 @@ class Loader:
                 ))
 
         walk(self.entries if entries is None else entries, None, {}, False)
-        return describe(nodes, tree="Entries")
+        return describe_declared(nodes, tree="Entries")
 
     async def load(self, entries: Sequence[Entry]) -> None:
         # Reconciles the running system to entries. The instantiations and retirements are issued, and any fiber

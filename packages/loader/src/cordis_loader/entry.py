@@ -69,3 +69,13 @@ def entries_from(data: Sequence[Mapping[str, Any]], keys: Mapping[str, Key[Any]]
         )
 
     return [one(item) for item in data]
+
+def patched(entries: Sequence[Entry], *patches: Entry) -> list[Entry]:
+    # Entries with each patch in place of the entry of the same id, or added after them when no entry has its id:
+    # how a composition swaps one component for another that keeps the same contract, or adds one.
+    by_id = {patch.id: patch for patch in patches}
+    result = [by_id.pop(entry.id, entry) for entry in entries]
+    return [*result, *by_id.values()]
+
+def without(entries: Sequence[Entry], *ids: str) -> list[Entry]:
+    return [entry for entry in entries if entry.id not in ids]

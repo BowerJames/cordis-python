@@ -134,10 +134,12 @@ def describe(nodes: Sequence[Declared], tree: str = "Fibers") -> str:
         width = max(len(label[node]) for node in order)
         digits = len(str(len(order)))
         for at, node in enumerate(order, start=1):
-            reasons = ", ".join(
-                f"{label[provider]} ({key_label(key, node.realm(key))})"
-                for key, provider in dependencies(nodes, node) if provider is not None
-            )
+            # Each provider once, with every key it gives this node, in the order they are first required.
+            given: dict[Declared, list[str]] = {}
+            for key, provider in dependencies(nodes, node):
+                if provider is not None:
+                    given.setdefault(provider, []).append(key_label(key, node.realm(key)))
+            reasons = ", ".join(f"{label[provider]} ({', '.join(keys)})" for provider, keys in given.items())
             line = f"  {at:>{digits}}. {label[node]}"
             lines.append(f"{line:<{width + digits + 5}}after {reasons}" if reasons else line)
         sections.append("\n".join(lines))
