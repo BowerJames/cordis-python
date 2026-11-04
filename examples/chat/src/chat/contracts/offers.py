@@ -21,7 +21,7 @@ class AgentProfile:
     slug: str
     instructions: str
     tools: tuple[str, ...]
-    max_steps: int = 20
+    max_steps: int = 1000
 
 # For the whole application, provided by chat: every provider and agent type a session can ask for.
 PROVIDERS: Key[Catalog[Provider]] = Key("providers")
