@@ -2,8 +2,9 @@ import asyncio
 import contextlib
 import socket
 from contextlib import suppress
+from dataclasses import replace
 from http import HTTPStatus
-from typing import AsyncIterator, Generator
+from typing import AsyncIterator, Awaitable, Callable, Generator
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 import uvicorn
@@ -16,7 +17,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from cordis import Component, Context, Entries, Inverse
 
 from ..contracts import (
-    APPLICATION,
     GET_ENV,
     ROUTES,
     SERVER_ADDRESS,
@@ -31,7 +31,6 @@ from ..contracts import (
     ServerResponse,
     Socket,
     SocketRoute,
-    serve,
 )
 
 DEFAULT_HOST = "127.0.0.1"
@@ -41,11 +40,45 @@ HTTP_HOST_VARIABLE = "HTTP_HOST"
 HTTP_PORT_VARIABLE = "HTTP_PORT"
 MAX_HEADER_BYTES = 65_536
 
-class _Routes:
-    # Every route and socket route an entry of its own.
-    __slots__ = ("_routes", "_sockets")
+class _InProgress:
+    # The calls of one route's handler that have begun and not yet returned.
+    __slots__ = ("_count", "_idle")
 
     def __init__(self) -> None:
+        self._count = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
+
+    def counted[**P, R](self, handle: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        async def counting(*args: P.args, **kwargs: P.kwargs) -> R:
+            self._count += 1
+            self._idle.clear()
+            try:
+                return await handle(*args, **kwargs)
+            finally:
+                self._count -= 1
+                if not self._count:
+                    self._idle.set()
+        return counting
+
+    def finished(self, grace: float) -> Awaitable[None] | None:
+        # Nothing to wait for when no call is in progress, so a route nobody is using is withdrawn at once.
+        if not self._count:
+            return None
+
+        async def waiting() -> None:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._idle.wait(), grace)
+        return waiting()
+
+class _Routes:
+    # Every route and socket route an entry of its own, each counting the calls of its handler in progress, so
+    # withdrawing one can wait for them: the table is where a server's request meets a contributor's handler, and
+    # neither declares the other, so nothing else could order a contributor's leaving after the requests it is serving.
+    __slots__ = ("_grace", "_routes", "_sockets")
+
+    def __init__(self, grace: float) -> None:
+        self._grace = grace
         self._routes: Entries[Route] = Entries()
         self._sockets: Entries[SocketRoute] = Entries()
 
@@ -54,14 +87,28 @@ class _Routes:
             raise ValueError(f"route {route} must start with /")
         if any((other.method.upper(), other.path) == (route.method.upper(), route.path) for other in self._routes):
             raise ValueError(f"two routes answer {route}")
-        return self._routes.add(route)
+        calls = _InProgress()
+        remove = self._routes.add(replace(route, handle=calls.counted(route.handle)))
+
+        def withdraw() -> Awaitable[None] | None:
+            remove()
+            return calls.finished(self._grace)
+
+        return withdraw
 
     def add_socket(self, route: SocketRoute) -> Inverse:
         if not route.path.startswith("/"):
             raise ValueError(f"socket route {route.path} must start with /")
         if any(other.path == route.path for other in self._sockets):
             raise ValueError(f"two socket routes answer {route.path}")
-        return self._sockets.add(route)
+        calls = _InProgress()
+        remove = self._sockets.add(replace(route, handle=calls.counted(route.handle)))
+
+        def withdraw() -> Awaitable[None] | None:
+            remove()
+            return calls.finished(self._grace)
+
+        return withdraw
 
     def routes(self) -> tuple[Route, ...]:
         return tuple(self._routes)
@@ -101,7 +148,7 @@ def _params(pattern: list[str], wanted: list[str]) -> dict[str, str] | None:
 def route_table() -> Component:
     # The routes, for contributors to add to and servers to answer from; neither requires the other.
     def apply(ctx: Context) -> None:
-        table = _Routes()
+        table = _Routes(ctx.runtime.grace)
         ctx.provide(ROUTES, RouteTable(add=table.add, add_socket=table.add_socket, routes=table.routes,
                                        sockets=table.sockets, socket=table.socket, match=table.match))
     return Component("route table", apply=apply, provides=(ROUTES,))
@@ -117,9 +164,10 @@ def health() -> Component:
     return Component("health", apply=apply, requires=(ROUTES,))
 
 def announce() -> Component:
-    # Says where the server is once the application has started, and says when it is going away. It relies on the
-    # server, through its address, so as the application ends it is told to stop before the server is: the farewell is
-    # written while the server still serves, by the order ending follows, not by anything this component arranges.
+    # Says where the server is, with the routes there as it activates, and says when it is going away. It relies on
+    # the server, through its address, so it is unloaded, and its work told to stop, before the server's is: the
+    # farewell is written while the server still serves, by the order unloading follows, not by anything this
+    # component arranges. It runs beside what the composition is for, so it holds nothing.
     def apply(ctx: Context) -> None:
         async def announcing(stopping: asyncio.Event) -> None:
             write = ctx.get(STDOUT)
@@ -129,9 +177,9 @@ def announce() -> Component:
             await stopping.wait()
             write("shutting down\n")
 
-        serve(ctx, "announce", announcing)
+        ctx.spawn(announcing, "announce", hold=False)
 
-    return Component("announce", apply=apply, requires=(APPLICATION, SERVER_ADDRESS, ROUTES, STDOUT))
+    return Component("announce", apply=apply, requires=(SERVER_ADDRESS, ROUTES, STDOUT))
 
 def listen_on(host: str | None, port: int | None, get_env: GetEnv) -> tuple[str, int]:
     # The factory's arguments first, then the environment, then the defaults.
@@ -261,7 +309,7 @@ def asyncio_http_server(host: str | None = None, port: int | None = None, max_bo
                 in_progress.discard(task)
 
         # Bound and listening now, so the address is known as the server activates, and early connections wait in the
-        # operating system's queue until the server starts accepting them, once the application has started.
+        # operating system's queue until the server starts accepting them, as its work begins.
         listening = _listening(chosen_host, chosen_port)
         server = await asyncio.start_server(connection, sock=listening, start_serving=False, limit=MAX_HEADER_BYTES)
 
@@ -278,15 +326,14 @@ def asyncio_http_server(host: str | None = None, port: int | None = None, max_bo
         async def serving(stopping: asyncio.Event) -> None:
             await server.start_serving()
             await stopping.wait()
-            # Told to stop: stop accepting, then let requests in progress finish (the application's grace bounds this).
+            # Told to stop: stop accepting, then let requests in progress finish (the runtime's grace bounds this).
             server.close()
             while in_progress:
                 await asyncio.wait(set(in_progress))
 
-        serve(ctx, "http server", serving)
+        ctx.spawn(serving, "http server")
 
-    return Component("asyncio http server", apply=apply, requires=(APPLICATION, ROUTES, GET_ENV),
-                     provides=(SERVER_ADDRESS,))
+    return Component("asyncio http server", apply=apply, requires=(ROUTES, GET_ENV), provides=(SERVER_ADDRESS,))
 
 # --- FastAPI ------------------------------------------------------------------------------------------------------
 
@@ -300,7 +347,8 @@ class _Server(uvicorn.Server):
         super().__init__(config)
         self.stopping = asyncio.Event()
 
-    # Signals belong to the application: uvicorn neither installs handlers nor re-raises signals after shutting down.
+    # Signals belong to whoever runs the composition: uvicorn neither installs handlers nor re-raises signals after
+    # shutting down.
     @contextlib.contextmanager
     def capture_signals(self) -> Generator[None, None, None]:
         yield
@@ -419,7 +467,6 @@ def fastapi_http_server(host: str | None = None, port: int | None = None, max_bo
                     with suppress(asyncio.CancelledError):
                         await running
 
-        serve(ctx, "http server", serving)
+        ctx.spawn(serving, "http server")
 
-    return Component("fastapi http server", apply=apply, requires=(APPLICATION, ROUTES, GET_ENV),
-                     provides=(SERVER_ADDRESS,))
+    return Component("fastapi http server", apply=apply, requires=(ROUTES, GET_ENV), provides=(SERVER_ADDRESS,))

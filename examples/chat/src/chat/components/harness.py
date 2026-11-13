@@ -4,7 +4,6 @@ from contextlib import suppress
 from typing import Any, Awaitable
 
 from cordis import Component, Context
-from cordis_plugins import APPLICATION, serve
 
 from ..contracts import (
     AGENT_TYPES,
@@ -40,7 +39,7 @@ async def _until[T](stopping: asyncio.Event, work: Awaitable[T]) -> T | None:
 def harness() -> Component:
     # The agent loop: takes each message from the connection, and asks the model until it stops calling tools. It runs
     # the agent type the session asked for, with the tools of that type offered in the session, and lets them put notes
-    # into the agent's context. The loop is served work of this fiber, so unloading the session ends it.
+    # into the agent's context. The loop is work of this fiber, so unloading the session ends it.
     def apply(ctx: Context) -> None:
         notes: list[Note] = []
         ctx.provide(INJECT, lambda text: notes.append(Note(text)))
@@ -117,7 +116,6 @@ def harness() -> Component:
             finally:
                 connection.finished.set()
 
-        serve(ctx, "agent loop", run, after_start=False)
+        ctx.spawn(run, "agent loop")
 
-    return Component("harness", apply=apply, requires=(APPLICATION, CONNECTION, MODEL, AGENT_TYPES, TOOLS),
-                     provides=(INJECT,))
+    return Component("harness", apply=apply, requires=(CONNECTION, MODEL, AGENT_TYPES, TOOLS), provides=(INJECT,))

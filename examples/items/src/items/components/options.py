@@ -1,7 +1,7 @@
 from typing import Any, Callable
 
 from cordis import Component, Context
-from cordis_plugins import APPLICATION, ARGS, CLI, ROUTES, STDOUT, Argument, option, switch
+from cordis_plugins import ARGS, CLI, ROUTES, STDOUT, Argument, option, switch
 
 
 def port_number(text: str) -> int:
@@ -38,18 +38,18 @@ def server_cli(server: Callable[..., Component]) -> Component:
     return Component("server cli", apply=apply, requires=(CLI,))
 
 def routes_command() -> Component:
-    # --routes prints the route table and ends the application. Routes live in their own table, so they are all there
-    # once everything has loaded, whether or not any server is.
+    # --routes prints the route table, and that is all the run then does: no server is loaded to hold the runtime
+    # (server_cli leaves it out), so the program is done once this has printed. Routes live in their own table, so
+    # they are all there once everything has loaded, whether or not any server is.
     def listing(ctx: Context) -> None:
         if not ctx.get(ARGS)(LIST_ROUTES):
             return
         write = ctx.get(STDOUT)
         for route in sorted(ctx.get(ROUTES).routes(), key=lambda route: (route.path, route.method)):
             write(f"{route.method.upper():<6} {route.path}\n")
-        ctx.get(APPLICATION).end(0)
 
     def apply(ctx: Context) -> None:
         _arguments(ctx, LIST_ROUTES)
-        ctx.inject([APPLICATION, ARGS, ROUTES, STDOUT], listing, name="route listing")
+        ctx.inject([ARGS, ROUTES, STDOUT], listing, name="route listing")
 
     return Component("routes command", apply=apply, requires=(CLI,))

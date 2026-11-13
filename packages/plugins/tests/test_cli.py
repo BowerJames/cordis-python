@@ -6,14 +6,15 @@ from cordis_plugins import (
     ARGS,
     CLI,
     UsageError,
-    argparse_cli,
+    argparse_args,
+    argument_table,
     capturing_stdio,
     option,
     positional,
     repeated,
-    run_application,
     switch,
 )
+from cordis_plugins.testing import run
 
 NAME = positional("name", "who to greet", str)
 TIMES = option("times", ("-n", "--times"), "how many times", int, default=1)
@@ -37,15 +38,16 @@ def add(ctx: Context, argument: Any) -> None:
     ctx.effect(lambda: ctx.get(CLI).add(argument))
 
 async def parse(argv: list[str], seen: list[Any]) -> tuple[int, str, str, bool]:
+    # As an entrypoint with a command line runs: the parser is loaded once every argument has been registered.
     capture, captured = capturing_stdio()
-    outcome = await run_application([
+    outcome = await run([
         Entry("stdio", capture),
-        Entry("cli", argparse_cli, config={"argv": argv, "prog": "greet"}),
+        Entry("cli", argument_table),
         Entry("greeter", greeter, config={"seen": seen}),
-    ], signals=False)
+    ], then=[Entry("args", argparse_args, config={"argv": argv, "prog": "greet"})])
     return outcome.status, captured.stdout, captured.stderr, bool(outcome.failed_with(UsageError))
 
-async def test_arguments_registered_by_components_are_parsed_once_the_application_starts() -> None:
+async def test_arguments_registered_by_components_are_parsed_once_they_have_all_loaded() -> None:
     seen: list[Any] = []
     status, _, _, _ = await parse(["ada", "-n", "3", "-t", "a", "--tag", "b", "--loud"], seen)
     assert status == 0
@@ -62,15 +64,17 @@ async def test_help_lists_every_registered_argument_and_ends_without_reading_any
     assert (status, usage, seen) == (0, False, [])
     assert "usage: greet [-h] [-n TIMES] [-t TAG] [--loud] name" in out
 
-async def test_a_command_line_that_does_not_match_prints_the_usage_and_ends_with_2() -> None:
+async def test_a_command_line_that_does_not_match_prints_the_usage_and_fails_with_a_usage_error() -> None:
+    # What status a usage error exits with is the entrypoint's to say; the run only reports that it failed.
     seen: list[Any] = []
     status, _, err, usage = await parse(["-n", "many"], seen)
-    assert (status, usage, seen) == (2, True, [])
+    assert (status, usage, seen) == (1, True, [])
     assert err.startswith("usage: greet")
     assert "argument -n/--times: invalid int value: 'many'" in err
 
 async def test_a_component_that_is_not_loaded_has_no_arguments() -> None:
     capture, captured = capturing_stdio()
-    await run_application([Entry("stdio", capture), Entry("cli", argparse_cli, config={"argv": ["--help"], "prog": "x"}),
-                           Entry("greeter", greeter, config={"seen": []}, disabled=True)], signals=False)
+    await run([Entry("stdio", capture), Entry("cli", argument_table),
+               Entry("greeter", greeter, config={"seen": []}, disabled=True)],
+              then=[Entry("args", argparse_args, config={"argv": ["--help"], "prog": "x"})])
     assert "name" not in captured.stdout

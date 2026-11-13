@@ -4,7 +4,7 @@ from typing import Any, NoReturn, Sequence
 
 from cordis import Component, Context, Entries, Inverse
 
-from ..contracts import APPLICATION, ARGS, CLI, STDERR, STDOUT, Argument, Arguments, UsageError
+from ..contracts import ARGS, CLI, STDERR, STDOUT, Argument, Arguments, UsageError
 
 
 class _Parser(argparse.ArgumentParser):
@@ -43,50 +43,47 @@ class _Arguments:
     def add(self, argument: Argument[Any], /) -> Inverse:
         return self._registered.add(argument)
 
-    def __iter__(self) -> Any:
-        return iter(self._registered)
+    def registered(self) -> tuple[Argument[Any], ...]:
+        return tuple(self._registered)
 
-def argparse_cli(argv: Sequence[str] | None = None, prog: str | None = None) -> Component:
-    # Provides CLI as soon as it loads, for components to register their arguments with, and parses the command line
-    # once the application has started, when every component that will register has. Only then does it provide ARGS,
-    # so components reading values wait for it as they would for any key. Asked for help, it prints it and ends the
-    # application; given a command line that does not match, it prints the usage and ends it with status 2.
+def argument_table() -> Component:
+    # The arguments, for components to register theirs with as they load; it knows nothing of how they are parsed.
     def apply(ctx: Context) -> None:
         arguments = _Arguments()
-        ctx.provide(CLI, Arguments(add=arguments.add))
-        app = ctx.get(APPLICATION)
+        ctx.provide(CLI, Arguments(add=arguments.add, registered=arguments.registered))
+    return Component("argument table", apply=apply, provides=(CLI,))
+
+def argparse_args(argv: Sequence[str] | None = None, prog: str | None = None) -> Component:
+    # Parses the command line as it activates, against every argument registered by then, and provides ARGS, so
+    # components reading values wait for it as they would for any key. Whoever runs the composition loads it once
+    # everything else has settled, when every component that will register has. Asked for help, it prints it and
+    # provides nothing: whatever waits for the arguments never starts, so a program that runs only for what reads them
+    # ends by itself. Given a command line that does not match, it prints the usage and fails with the UsageError.
+    def apply(ctx: Context) -> None:
         given = list(sys.argv[1:] if argv is None else argv)
+        parser = _Parser(prog=prog, add_help=False)
+        parser.add_argument("-h", "--help", action="store_true", help="show this help and exit")
+        dests = {f"argument_{index}": argument for index, argument in enumerate(ctx.get(CLI).registered())}
+        for dest, argument in dests.items():
+            _add(parser, dest, argument)
+        # Help is looked for first, so it is shown even when the rest of the command line is incomplete.
+        if _asks_for_help(given):
+            ctx.get(STDOUT)(parser.format_help())
+            return
+        try:
+            parsed = vars(parser.parse_args(given))
+        except UsageError as error:
+            ctx.get(STDERR)(f"{parser.format_usage()}{parser.prog}: error: {error}\n")
+            raise
+        values: dict[Argument[Any], Any] = {argument: tuple(parsed[dest]) if argument.kind == "repeated" else parsed[dest]
+                                            for dest, argument in dests.items()}
 
-        def parse() -> None:
-            registered = list(arguments)
-            parser = _Parser(prog=prog, add_help=False)
-            parser.add_argument("-h", "--help", action="store_true", help="show this help and exit")
-            dests = {f"argument_{index}": argument for index, argument in enumerate(registered)}
-            for dest, argument in dests.items():
-                _add(parser, dest, argument)
-            # Help is looked for first, so it is shown even when the rest of the command line is incomplete.
-            if _asks_for_help(given):
-                ctx.get(STDOUT)(parser.format_help())
-                app.end(0)
-                return
-            try:
-                parsed = vars(parser.parse_args(given))
-            except UsageError as error:
-                ctx.get(STDERR)(f"{parser.format_usage()}{parser.prog}: error: {error}\n")
-                app.end(2)
-                app.fail(error, "argparse cli", ctx.fiber)
-                return
-            values: dict[Argument[Any], Any] = {argument: tuple(parsed[dest]) if argument.kind == "repeated" else parsed[dest]
-                      for dest, argument in dests.items()}
+        def read[T](argument: Argument[T], /) -> T:
+            if argument not in values:
+                raise LookupError(f"{argument.name} was never registered on the command line")
+            value: T = values[argument]
+            return value
 
-            def read[T](argument: Argument[T], /) -> T:
-                if argument not in values:
-                    raise LookupError(f"{argument.name} was never registered on the command line")
-                value: T = values[argument]
-                return value
+        ctx.provide(ARGS, read)
 
-            ctx.provide(ARGS, read)
-
-        ctx.effect(lambda: app.when_started(parse), "parse once started")
-
-    return Component("argparse cli", apply=apply, requires=(APPLICATION, STDOUT, STDERR), provides=(CLI, ARGS))
+    return Component("argparse args", apply=apply, requires=(CLI, STDOUT, STDERR), provides=(ARGS,))

@@ -4,7 +4,8 @@ from pathlib import Path
 from chat.components import workspace
 from chat.components.ignore import hidden_by_git
 from cordis_loader import Entry
-from cordis_plugins import environment, run_application
+from cordis_plugins import environment
+from cordis_plugins.testing import run
 
 
 def files(root: Path, contents: dict[str, str]) -> Path:
@@ -76,8 +77,8 @@ def test_a_workspace_its_repository_ignores_is_hidden_with_everything_in_it(tmp_
 
 async def test_the_workspace_component_refuses_a_workspace_its_repository_ignores(tmp_path: Path) -> None:
     files(tmp_path, {".git/": "", ".gitignore": "workspace/\n", "workspace/app.py": ""})
-    outcome = await run_application([Entry("env", lambda: environment({})),
-                                     Entry("workspace", workspace, config={"root": tmp_path / "workspace"})], signals=False)
+    outcome = await run([Entry("env", lambda: environment({})),
+                         Entry("workspace", workspace, config={"root": tmp_path / "workspace"})])
     [(_, error)] = outcome.failures
     assert isinstance(error, PermissionError)
     assert str(error) == f"the workspace {tmp_path / 'workspace'} is ignored by its repository, so its tools would see nothing"

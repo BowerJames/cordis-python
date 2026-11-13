@@ -6,7 +6,7 @@ import signal
 import pytest
 
 from cordis import Component, Context
-from cordis_loader import Entry, patched
+from cordis_loader import Entry, describe, patched
 from cordis_plugins import (
     HTTP,
     Answer,
@@ -15,7 +15,6 @@ from cordis_plugins import (
     Request,
     Response,
     capturing_stdio,
-    describe,
     observed_client,
     recording_http,
     respond,
@@ -89,36 +88,36 @@ async def test_a_failed_request_is_reported_on_stderr_and_exits_1(capsys: pytest
 
 def test_the_composition_is_described_without_running_anything() -> None:
     # The order a load from scratch activates the entries in, and why; curl's fetch and verbose's output are children
-    # each instantiates once the command line is parsed, so they appear only once it runs.
+    # each instantiates once the command line is parsed, so they appear only once it runs. The description reads the
+    # declarations alone: that the parser is loaded once the rest have settled is the entrypoint's to arrange.
     assert describe(compose(["https://example.com"])) == """\
 Activation order (unloaded in reverse):
-  1. application
-  2. stdio
-  3. env
-  4. cli         after application (application), stdio (stdout, stderr)
-  5. http        after env (get_env)
-  6. curl        after cli (cli)
-  7. verbose     after cli (cli)
+  1. stdio
+  2. env
+  3. cli
+  4. http    after env (get_env)
+  5. curl    after cli (cli)
+  6. verbose after cli (cli)
+  7. args    after cli (cli), stdio (stdout, stderr)
 
 Entries:
-  application  application
-  stdio        stdio
-  env          env os
-  cli          argparse cli
-  http         httpx http
-  curl         curl
-  verbose      verbose
+  stdio    stdio
+  env      env os
+  cli      argument table
+  http     httpx http
+  curl     curl
+  verbose  verbose
+  args     argparse args
 
 Keys:
-  application         provided by application; required by cli
-  stdout              provided by stdio; required by cli
-  stderr              provided by stdio; required by cli
+  stdout              provided by stdio; required by args
+  stderr              provided by stdio; required by args
   stdout_is_terminal  provided by stdio
   stderr_is_terminal  provided by stdio
   get_env             provided by env; required by http
-  cli                 provided by cli; required by curl, verbose
-  args                provided by cli
-  http                provided by http"""
+  cli                 provided by cli; required by curl, verbose, args
+  http                provided by http
+  args                provided by args"""
 
 
 # curl -v: added by a component of its own, without editing curl

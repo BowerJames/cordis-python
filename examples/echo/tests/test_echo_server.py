@@ -1,9 +1,12 @@
+import asyncio
+import os
+import signal
 from typing import Any
 
 import pytest
 
 from cordis import Context
-from cordis_loader import Entry, patched
+from cordis_loader import Entry, describe, patched
 from cordis_plugins import (
     HTTP,
     ROUTES,
@@ -12,12 +15,11 @@ from cordis_plugins import (
     Request,
     asyncio_http_server,
     capturing_stdio,
-    describe,
     health,
     httpx_http,
     route_table,
 )
-from cordis_plugins.testing import Steps, scenario
+from cordis_plugins.testing import Steps, run_scenario
 from echo.components import echo
 from echo.entrypoints.echo_server import Server, compose, run
 
@@ -28,11 +30,13 @@ def server(request: pytest.FixtureRequest) -> Server:
     return chosen
 
 async def echo_server(steps: Steps, server: Server, *extra: Entry) -> tuple[int, Captured]:
-    # The composition as shipped, on a free port, with captured stdio, an HTTP client, and a scenario that talks to it.
+    # The composition as shipped, on a free port, with captured stdio, an HTTP client, and a scenario that talks to it:
+    # the run is done when the scenario's steps are, though the server would serve on.
     capture, captured = capturing_stdio()
-    entries = patched(compose(port=0, server=server), Entry("stdio", capture), Entry("http", httpx_http),
-                      Entry("scenario", lambda: scenario(steps, requires=(HTTP, SERVER_ADDRESS))), *extra)
-    return await run(entries), captured
+    entries = patched(compose(port=0, server=server), Entry("stdio", capture), Entry("http", httpx_http), *extra)
+    outcome = await run_scenario(entries, steps, requires=(HTTP, SERVER_ADDRESS))
+    assert outcome.failures == ()
+    return outcome.status, captured
 
 
 @pytest.mark.external
@@ -82,30 +86,37 @@ async def test_the_server_is_announced_with_its_routes_once_started_and_its_end_
     assert status == 0
     assert captured.stdout == f"listening on {seen['address']}\n  POST   /echo\n  GET    /health\nshutting down\n"
 
+@pytest.mark.external
+async def test_the_entrypoint_serves_until_a_signal_and_then_unloads_everything(server: Server) -> None:
+    # As shipped: nothing ends a server but being asked to stop, and what it was doing ends in order.
+    capture, captured = capturing_stdio()
+    asyncio.get_running_loop().call_later(0.1, os.kill, os.getpid(), signal.SIGINT)
+    status = await asyncio.wait_for(run(patched(compose(port=0, server=server), Entry("stdio", capture))), 0.8)
+    assert status == 0
+    assert captured.stdout.startswith("listening on http://127.0.0.1:")
+    assert captured.stdout.endswith("shutting down\n")
+
 def test_the_composition_is_described_without_running_anything() -> None:
     assert describe(compose()) == """\
 Activation order (unloaded in reverse):
-  1. application
-  2. stdio
-  3. env
-  4. routes
-  5. server      after application (application), routes (routes), env (get_env)
-  6. health      after routes (routes)
-  7. echo        after routes (routes)
-  8. announce    after application (application), server (server_address), routes (routes), stdio (stdout)
+  1. stdio
+  2. env
+  3. routes
+  4. server   after routes (routes), env (get_env)
+  5. health   after routes (routes)
+  6. echo     after routes (routes)
+  7. announce after server (server_address), routes (routes), stdio (stdout)
 
 Entries:
-  application  application
-  stdio        stdio
-  env          env os
-  routes       route table
-  server       asyncio http server
-  health       health
-  echo         echo
-  announce     announce
+  stdio     stdio
+  env       env os
+  routes    route table
+  server    asyncio http server
+  health    health
+  echo      echo
+  announce  announce
 
 Keys:
-  application         provided by application; required by server, announce
   stdout              provided by stdio; required by announce
   stderr              provided by stdio
   stdout_is_terminal  provided by stdio
@@ -142,7 +153,7 @@ async def test_two_servers_kept_apart_each_answer_only_their_own_routes() -> Non
                   isolate={ROUTES: True, SERVER_ADDRESS: True})
     capture, _ = capturing_stdio()
     entries = [*(entry for entry in compose(port=0) if entry.id in ("stdio", "env", "routes", "server")), Entry("echo", echo), Entry("http", httpx_http),
-               Entry("scenario", lambda: scenario(steps, requires=(HTTP, SERVER_ADDRESS))), admin]
-    status = await run(patched(entries, Entry("stdio", capture)))
-    assert status == 0
+               admin]
+    outcome = await run_scenario(patched(entries, Entry("stdio", capture)), steps, requires=(HTTP, SERVER_ADDRESS))
+    assert (outcome.status, outcome.failures) == (0, ())
     assert seen == {"main health": 404, "admin health": 200, "main echo": 200, "admin echo": 404}

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, Gener
 
 from .component import Component
 from .effect import Accumulator, Activation, Inverse, execute, execute_now, needs_awaiting
+from .entries import Entries
 from .errors import InactiveEffect, InsertionError
 from .key import Key, Metadata, RealmId
 
@@ -30,6 +31,7 @@ INSTALLED = frozenset({FiberState.LOADING, FiberState.ACTIVE, FiberState.UNLOADI
 SETTLED = frozenset({FiberState.INACTIVE, FiberState.FAILED})
 
 type ErrorHandler = Callable[["Fiber", Exception], None]
+DEFAULT_GRACE = 5.0
 # A committed or target view: each declared key mapped to the fiber providing it.
 type View = Mapping[Key[Any], "Fiber"]
 
@@ -100,6 +102,7 @@ class Fiber:
         "component",
         "ctx",
         "error",
+        "holds",
         "inertia",
         "origin",
         "parent",
@@ -143,6 +146,9 @@ class Fiber:
         self.inertia: asyncio.Task[None] | None = None
         # Effects whose iterations are still landing; an activation waits for them before the fiber is active.
         self.pending: set[asyncio.Task[None]] = set()
+        # What this fiber keeps the runtime running for, each hold an entry of its own with a label for people. No
+        # rule reads it: holding changes when the runtime is done, never what any fiber does.
+        self.holds: Entries[str] = Entries()
         self.removed = False
         self._retire: Inverse | None = None
 
@@ -179,8 +185,14 @@ class Fiber:
 class Runtime:
     # The registry of fibers and the rules that move them (Section 4.2). Orchestration (use, retire) is the only
     # input; the lifecycle rules then fire unprompted whenever their premises hold, and no rule names a scheduler.
-    def __init__(self, on_error: ErrorHandler = log_error) -> None:
+    def __init__(self, on_error: ErrorHandler = log_error, grace: float = DEFAULT_GRACE) -> None:
         from .context import Context
+        # How long work told to stop is given to finish before it is cancelled, unless it says otherwise: the bound
+        # that keeps an unloading from waiting for ever on work that will not end.
+        self.grace = grace
+        self._stopped = False
+        # The handler each containing fiber gave for failures at it and beneath it; on_error is the root's.
+        self._handlers: dict[Fiber, ErrorHandler] = {}
         self._uids = itertools.count(1)
         self._fibers: dict[int, Fiber] = {}
         # The one fiber that may provide each realm, fixed by the provisions at insertion and not by the state.
@@ -362,7 +374,61 @@ class Runtime:
             self.report(owner, error)
 
     def report(self, fiber: Fiber, error: Exception) -> None:
+        # A failure goes to the nearest handler containing the fiber it happened at, and to on_error when nothing
+        # contains it. It stays on that fiber either way (Section 4.4): reporting it moves no other fiber. A handler
+        # that raises passes what it raised on to the next handler out.
+        at: Fiber | None = fiber
+        while at is not None:
+            handler = self._handlers.get(at)
+            if handler is not None:
+                try:
+                    handler(fiber, error)
+                    return
+                except Exception as passed:  # noqa: BLE001 - whatever a handler raises is what it passes on
+                    error = passed
+            at = at.parent
         self._on_error(fiber, error)
+
+    def contain(self, fiber: Fiber, handler: ErrorHandler) -> Inverse:
+        # Gives the failures of fiber, and of everything instantiated beneath it, to handler until the inverse is
+        # applied: they fail only what was contained, such as one session.
+        self._handlers[fiber] = handler
+
+        def release() -> None:
+            if self._handlers.get(fiber) is handler:
+                del self._handlers[fiber]
+
+        return release
+
+    # --- holding -------------------------------------------------------------------------------------------------
+
+    def hold(self, fiber: Fiber, label: str) -> Inverse:
+        # Keeps the runtime from being done until the inverse is applied. Holding is how what a fiber is still doing,
+        # such as a task serving requests or a timer yet to fire, is counted: asyncio ends a program when its main
+        # coroutine returns, whatever else is running, so whoever runs a composition waits for done instead.
+        release = fiber.holds.add(label)
+        self._signal()
+
+        def let_go() -> None:
+            release()
+            self._signal()
+
+        return let_go
+
+    def held(self, under: Fiber | None = None) -> tuple[str, ...]:
+        # The label of every hold now taken: by the fiber given and what it instantiated, or by any fiber.
+        members = self._subtree(under) if under is not None else (self.root_fiber, *self._fibers.values())
+        return tuple(label for fiber in members for label in fiber.holds)
+
+    def stop(self) -> None:
+        # Asks whoever is waiting for done to stop waiting. It unloads nothing itself: the orchestrator that was
+        # waiting does that, by closing the runtime, which retires every fiber, dependents first.
+        self._stopped = True
+        self._signal()
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
 
     # --- reactive notification and the lifecycle rules -----------------------------------------------------------
 
@@ -472,8 +538,24 @@ class Runtime:
         # end inside this call, and leave a finished transition recorded as in flight, so the fiber could never leave.
         task = asyncio.Task(coroutine, loop=asyncio.get_running_loop(), eager_start=False)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._landed)
         return task
+
+    def _landed(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        self._signal()
+
+    def _subtree(self, fiber: Fiber) -> list[Fiber]:
+        return [fiber, *(member for child in self.children(fiber) for member in self._subtree(child))]
+
+    def _idle(self, under: Fiber | None) -> bool:
+        # No transition or effect in flight and nothing held: everywhere, or at a fiber and what it instantiated.
+        if under is None:
+            return not self.held() and all(task.done() for task in self._tasks)
+        return not self.held(under) and all(
+            task is None or task.done()
+            for fiber in self._subtree(under) for task in (fiber.inertia, *fiber.pending)
+        )
 
     def _signal(self) -> None:
         changed, self._changed = self._changed, asyncio.Event()
@@ -492,16 +574,20 @@ class Runtime:
                 await asyncio.wait(pending)
             return
 
-        def subtree(fiber: Fiber) -> list[Fiber]:
-            return [fiber, *(member for child in self.children(fiber) for member in subtree(child))]
-
         while True:
-            members = subtree(under)
+            members = self._subtree(under)
             pending = {task for fiber in members for task in (fiber.inertia, *fiber.pending)
                        if task is not None and not task.done()}
             if not pending:
                 return
             await asyncio.wait(pending)
+
+    async def done(self, under: Fiber | None = None) -> None:
+        # Waits until the runtime has nothing left to run for: it has settled and nothing holds it, or it was asked to
+        # stop. Given a fiber, waits only for it and what it instantiated, so a composition can name what it runs for,
+        # such as a terminal client beside a server that would otherwise serve for ever. Settle first when waiting on a
+        # fiber, since one that has not yet activated holds nothing.
+        await self.wait_for(lambda: self._stopped or self._idle(under))
 
     async def close(self) -> None:
         # Reverts everything the root did, which retires every top-level fiber, and waits for them all to leave.
@@ -509,8 +595,8 @@ class Runtime:
         await self.settled()
 
 @asynccontextmanager
-async def open_runtime(on_error: ErrorHandler = log_error) -> AsyncIterator["Runtime"]:
-    runtime = Runtime(on_error)
+async def open_runtime(on_error: ErrorHandler = log_error, grace: float = DEFAULT_GRACE) -> AsyncIterator["Runtime"]:
+    runtime = Runtime(on_error, grace)
     try:
         yield runtime
     finally:

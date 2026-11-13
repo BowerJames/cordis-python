@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import dataclass
 
 from cordis import Component, Context
-from cordis_plugins import APPLICATION, ROUTES, SERVER_ADDRESS, STDOUT, Route, ServerRequest, ServerResponse, serve
+from cordis_plugins import ROUTES, SERVER_ADDRESS, STDOUT, Route, ServerRequest, ServerResponse
 
 
 @dataclass(slots=True)
@@ -12,9 +12,9 @@ class DiscoveryState:
 
 def discovery() -> Component:
     # Serves its own status, and registers with discovery while a server is answering: the registration is a child
-    # requiring the server's address, so it begins once the server has bound, and as the application ends it is told
-    # to stop, and deregisters, before the server stops accepting. That order follows what relies on what; nothing
-    # here arranges it.
+    # requiring the server's address, so it begins once the server has bound, and it is unloaded, and so told to stop,
+    # and deregisters, before the server stops accepting. That order follows what relies on what; nothing here
+    # arranges it. Staying registered is not what the program runs for, so it holds nothing.
     state = DiscoveryState()
 
     def registration(ctx: Context) -> None:
@@ -27,13 +27,13 @@ def discovery() -> Component:
             state.registered = False
             ctx.get(STDOUT)("deregistered from discovery\n")
 
-        serve(ctx, "registration", registered)
+        ctx.spawn(registered, "registration", hold=False)
 
     def apply(ctx: Context) -> None:
         async def status(request: ServerRequest) -> ServerResponse:
             return ServerResponse.json({"address": state.address, "registered": state.registered})
 
         ctx.effect(lambda: ctx.get(ROUTES).add(Route("GET", "/discovery", status)), "route GET /discovery")
-        ctx.inject([APPLICATION, SERVER_ADDRESS, STDOUT], registration, name="registration")
+        ctx.inject([SERVER_ADDRESS, STDOUT], registration, name="registration")
 
     return Component("discovery", apply=apply, requires=(ROUTES,))

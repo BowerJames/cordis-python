@@ -7,10 +7,9 @@ from typing import Awaitable, Callable
 
 import pytest
 
-from cordis import Component, Context
+from cordis import Context
 from cordis_loader import Entry
 from cordis_plugins import (
-    APPLICATION,
     SQL,
     ConstraintViolation,
     Sql,
@@ -18,11 +17,10 @@ from cordis_plugins import (
     get_env_os,
     postgres_pool,
     postgres_sql,
-    run_application,
-    serve,
     sqlite_database,
     sqlite_sql,
 )
+from cordis_plugins.testing import run_scenario
 
 type Provider = Callable[[Path], list[Entry]]
 
@@ -43,18 +41,11 @@ def provider(request: pytest.FixtureRequest, tmp_path: Path) -> list[Entry]:
     return PROVIDERS[request.param](tmp_path)
 
 async def using(provider: list[Entry], steps: Callable[[Sql], Awaitable[None]]) -> None:
-    # Runs steps with the provider's Sql once the application has started; what goes wrong in them is raised as itself.
-    def talking() -> Component:
-        def apply(ctx: Context) -> None:
-            async def talk(stopping: asyncio.Event) -> None:
-                try:
-                    await steps(ctx.get(SQL))
-                finally:
-                    ctx.get(APPLICATION).end(0)
-            serve(ctx, "talking", talk)
-        return Component("talking", apply=apply, requires=(APPLICATION, SQL))
+    # Runs steps with the provider's Sql once it has loaded; what goes wrong in them is raised as itself.
+    async def talking(ctx: Context) -> None:
+        await steps(ctx.get(SQL))
 
-    outcome = await run_application([*provider, Entry("talking", talking)], signals=False)
+    outcome = await run_scenario(provider, talking, requires=(SQL,))
     if outcome.failures:
         raise outcome.failures[0][1]
 

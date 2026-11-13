@@ -5,18 +5,18 @@ import os
 import sys
 from typing import Literal
 
-from cordis_loader import Entry
+from cordis import open_runtime
+from cordis_loader import Entry, Loader, describe
 from cordis_plugins import (
-    Outcome,
+    StopOnFailure,
     announce,
     asyncio_http_server,
-    describe,
     fastapi_http_server,
     get_env_os,
     health,
     route_table,
-    run_application,
     stdio,
+    stop_on_signals,
 )
 from echo.components import echo
 
@@ -41,14 +41,21 @@ def chosen_server() -> Server:
         sys.exit(f"echo-server: ECHO_SERVER must be asyncio or fastapi, not {chosen!r}")
     return "fastapi" if chosen == "fastapi" else "asyncio"
 
-def report(prog: str, outcome: Outcome) -> int:
-    for _, error in outcome.failures:
+def report(prog: str, failed: StopOnFailure) -> int:
+    for _, error in failed.failures:
         notes = "; ".join(getattr(error, "__notes__", []))
         sys.stderr.write(f"{prog}: {error}" + (f" ({notes})" if notes else "") + "\n")
-    return outcome.status
+    return failed.status()
 
 async def run(entries: list[Entry]) -> int:
-    return report("echo-server", await run_application(entries))
+    # The server holds the runtime for as long as it serves, so this runs until a signal, or a failure, asks it to
+    # stop; leaving the runtime's block then unloads everything, what relies on the server before the server.
+    failed = StopOnFailure()
+    async with open_runtime(on_error=failed) as runtime:
+        with stop_on_signals(runtime):
+            await Loader(runtime.root).load(entries)
+            await runtime.done()
+    return report("echo-server", failed)
 
 def main() -> None:
     if "--describe" in sys.argv[1:]:

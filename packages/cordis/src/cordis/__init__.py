@@ -11,7 +11,8 @@ from .errors import (
     UndeclaredAccess,
 )
 from .key import Key, Metadata, Realm, RealmId, merge_right
-from .runtime import Effect, Fiber, FiberState, Runtime, open_runtime
+from .runtime import Effect, ErrorHandler, Fiber, FiberState, Runtime, open_runtime
+from .work import Work
 
 __version__ = "0.1.0"
 
@@ -24,6 +25,7 @@ __all__ = [
     "CordisError",
     "Effect",
     "Entries",
+    "ErrorHandler",
     "Fiber",
     "FiberState",
     "Guard",
@@ -38,6 +40,7 @@ __all__ = [
     "RealmId",
     "Runtime",
     "UndeclaredAccess",
+    "Work",
     "merge_right",
     "open_runtime",
 ]

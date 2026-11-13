@@ -9,21 +9,10 @@ import pytest
 from chat.components import workspace
 from chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, ToolCall, Turn
 from chat.entrypoints import tui
-from chat.entrypoints.server import compose, with_a_session
+from chat.entrypoints.server import compose, run_until_done, with_a_session
 from cordis import Component, Context
-from cordis_loader import Entry, patched, without
-from cordis_plugins import (
-    APPLICATION,
-    ROUTES,
-    SERVER_ADDRESS,
-    Socket,
-    SocketHandler,
-    capturing_stdio,
-    describe,
-    environment,
-    run_application,
-    serve,
-)
+from cordis_loader import Entry, describe, patched, without
+from cordis_plugins import ROUTES, SERVER_ADDRESS, Socket, SocketHandler, capturing_stdio, environment
 
 
 class Client:
@@ -67,8 +56,8 @@ type Connect = Callable[[Mapping[str, str]], Client]
 
 def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Component:
     # Stands in for the HTTP server without a socket: hands /ws/chat connections made in memory to the socket route in
-    # the table, runs the conversation once the application has started, then ends the application and, like a real
-    # server, lets its connections finish as it is told to stop.
+    # the table. The conversation is the work the run is for, so the run is done when it is; and, like a real server,
+    # it lets its connections finish as it is told to stop.
     def apply(ctx: Context) -> None:
         ctx.provide(SERVER_ADDRESS, "memory://")
         clients: list[Client] = []
@@ -80,14 +69,16 @@ def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Compone
             return clients[-1]
 
         async def serving(stopping: asyncio.Event) -> None:
-            await conversation(connect)
-            ctx.get(APPLICATION).end(0)
             await stopping.wait()
             await asyncio.gather(*(client.task for client in clients))
 
-        serve(ctx, "memory server", serving)
+        async def talking(stopping: asyncio.Event) -> None:
+            await conversation(connect)
 
-    return Component("memory server", apply=apply, requires=(APPLICATION, ROUTES), provides=(SERVER_ADDRESS,))
+        ctx.spawn(serving, "memory server", hold=False)
+        ctx.spawn(talking, "conversation")
+
+    return Component("memory server", apply=apply, requires=(ROUTES,), provides=(SERVER_ADDRESS,))
 
 def scripted(replies: list[AssistantMessage], turns: list[Turn]) -> Component:
     # A provider for tests: one more provider on offer, added as an entry of its own without touching anything else.
@@ -107,18 +98,19 @@ async def composed(conversation: Callable[[Connect], Awaitable[None]], root: Pat
                    replies: list[AssistantMessage] | None = None, turns: list[Turn] | None = None,
                    env: Mapping[str, str] = {}, stdio: Callable[[], Component] | None = None,
                    entries: list[Entry] | None = None) -> int:
-    # The real chat server, with memory in place of the network, the terminal, the environment and the models: each
-    # swapped by its entry.
-    outcome = await run_application(patched(
+    # The real chat server, run as its entrypoint runs it, with memory in place of the network, the terminal, the
+    # environment and the models: each swapped by its entry. The run is for the server's conversation, which begins
+    # once everything else has settled.
+    failed = await run_until_done(patched(
         entries if entries is not None else compose(),
         Entry("stdio", stdio or capturing_stdio()[0]),
         Entry("env", lambda: environment(env)),
         Entry("server", lambda: memory_server(conversation)),
         Entry("workspace", lambda: workspace(root)),
         Entry("scripted", lambda: scripted(replies if replies is not None else [], turns if turns is not None else [])),
-    ), signals=False)
-    assert outcome.failures == (), outcome.failures
-    return outcome.status
+    ), last="server", signals=False)
+    assert failed.failures == [], failed.failures
+    return failed.status()
 
 def calling(id: str, name: str, **arguments: Any) -> AssistantMessage:
     return AssistantMessage("", (ToolCall(id, name, json.dumps(arguments)),))
@@ -363,7 +355,8 @@ async def test_a_refused_connection_opens_no_session_and_is_not_logged(root: Pat
     assert sessions_logged(captured.stdout) == []
 
 async def test_a_session_ended_by_the_server_ending_is_still_logged_as_closed(root: Path) -> None:
-    # The connection finishes while the server's services are ending, after the bus's own service has ended.
+    # The entrypoint unloads chat, and so ends its sessions, while the bus and the log listening to it are still
+    # loaded.
     stdio, captured = capturing_stdio()
 
     async def conversation(connect: Connect) -> None:
@@ -387,20 +380,55 @@ async def test_ending_the_server_ends_open_sessions_first(root: Path) -> None:
 
 
 def real(root: Path, replies: list[AssistantMessage], client: Callable[[Context], Awaitable[None]]) -> list[Entry]:
-    # The real chat server on a free port, with a client component talking to it once the application has started.
+    # The real chat server on a free port, with a client component talking to it: the entry the run is for, loaded
+    # once the server has settled.
     def talking() -> Component:
         def apply(ctx: Context) -> None:
             async def talk(stopping: asyncio.Event) -> None:
-                try:
-                    await client(ctx)
-                finally:
-                    ctx.get(APPLICATION).end(0)
-            serve(ctx, "client", talk)
-        return Component("client", apply=apply, requires=(APPLICATION, SERVER_ADDRESS))
+                await client(ctx)
+            ctx.spawn(talk, "client")
+        return Component("client", apply=apply, requires=(SERVER_ADDRESS,))
 
     return patched(compose(port=0), Entry("stdio", capturing_stdio()[0]), Entry("env", lambda: environment({})),
                    Entry("workspace", lambda: workspace(root)), Entry("scripted", lambda: scripted(replies, [])),
                    Entry("client", talking))
+
+@pytest.mark.external
+@pytest.mark.timeout(10)
+async def test_the_server_serves_until_a_signal_ends_its_sessions_and_then_unloads(root: Path) -> None:
+    # The entrypoint as shipped, with nothing named as what the run is for: the server holds the runtime until a
+    # signal asks it to stop, and a session open then is ended, and logged as closed, before the rest unloads.
+    import os
+    import signal
+
+    from websockets.asyncio.client import connect
+
+    stdio, captured = capturing_stdio()
+    closed: list[int | None] = []
+
+    async def client(ctx: Context) -> None:
+        address = ctx.get(SERVER_ADDRESS).replace("http://", "ws://")
+        async with connect(f"{address}/ws/chat?provider=scripted&model_name=any&agent_type=reader") as socket:
+            assert json.loads(await socket.recv())["type"] == "ready"
+            os.kill(os.getpid(), signal.SIGINT)
+            await socket.wait_closed()
+            closed.append(socket.close_code)
+
+    def talking() -> Component:
+        def apply(ctx: Context) -> None:
+            async def talk(stopping: asyncio.Event) -> None:
+                await client(ctx)
+            ctx.spawn(talk, "client", hold=False)
+        return Component("client", apply=apply, requires=(SERVER_ADDRESS,))
+
+    entries = patched(compose(port=0), Entry("stdio", stdio), Entry("env", lambda: environment({})),
+                      Entry("workspace", lambda: workspace(root)), Entry("scripted", lambda: scripted([], [])),
+                      Entry("client", talking))
+    failed = await run_until_done(entries)
+    assert failed.failures == []
+    assert closed == [1000]
+    assert sessions_logged(captured.stdout) == ["session 1 opened: scripted/any as reader", "session 1 closed"]
+    assert captured.stdout.endswith("shutting down\n")
 
 @pytest.mark.external
 async def test_a_real_websocket_session_against_the_real_server(root: Path) -> None:
@@ -416,9 +444,9 @@ async def test_a_real_websocket_session_against_the_real_server(root: Path) -> N
             while events[-1]["type"] != "assistant":
                 events.append(json.loads(await socket.recv()))
 
-    outcome = await run_application(real(root, [calling("1", "listDir"), AssistantMessage("two entries")], client),
-                                    signals=False)
-    assert outcome.failures == ()
+    failed = await run_until_done(real(root, [calling("1", "listDir"), AssistantMessage("two entries")], client),
+                                  last="client", signals=False)
+    assert failed.failures == []
     assert [event["type"] for event in events] == ["ready", "tool_call", "tool_result", "assistant"]
     assert events[2]["output"] == "notes.txt\nsrc/"
 
@@ -457,9 +485,9 @@ async def test_the_terminal_client_talks_to_an_agent_through_the_real_server(roo
                 shown.append(widget.source if isinstance(widget, Markdown) else str(widget.content)
                              if isinstance(widget, Static) else type(widget).__name__)
 
-    outcome = await run_application(real(root, [calling("1", "listDir"), AssistantMessage("There are **two** entries.")],
-                                         drive), signals=False)
-    assert outcome.failures == ()
+    failed = await run_until_done(real(root, [calling("1", "listDir"), AssistantMessage("There are **two** entries.")],
+                                       drive), last="client", signals=False)
+    assert failed.failures == []
     assert shown == [
         "connected to scripted/any · reader · tools: listDir, read",
         "you: list the files",

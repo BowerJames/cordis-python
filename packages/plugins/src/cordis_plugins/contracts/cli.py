@@ -3,10 +3,14 @@ from typing import Any, Callable, Literal, Protocol, overload
 
 from cordis import Inverse, Key
 
-# A command line assembled from what the running components register, then parsed once the application has started.
+# A command line assembled from what the running components register, then parsed by whichever component keeps ARGS.
 # Registering an argument is an effect of the component registering it, so a component that is not loaded has no
 # arguments; reading values needs ARGS, which is provided only once the command line has been parsed, so a component
 # that reads them waits for that, as for any other key.
+#
+# A command line can only be parsed whole: which word is a positional depends on which options take a value. So the
+# parser reads every argument registered when it activates, once, and whoever runs the composition loads it after
+# everything else has settled. That order is the one thing here a composition has to arrange.
 
 type Kind = Literal["positional", "option", "repeated", "switch"]
 
@@ -44,6 +48,8 @@ class Arguments:
     # The value bound at CLI: add registers an argument until the inverse it returns is applied. Each registration is
     # an entry of its own, so registrations from different components are independent of each other.
     add: Callable[[Argument[Any]], Inverse]
+    # Every argument registered now, in the order they were added.
+    registered: Callable[[], tuple[Argument[Any], ...]]
 
 class ReadArgument(Protocol):
     # Looks up the value of an argument: args(URL) -> str.

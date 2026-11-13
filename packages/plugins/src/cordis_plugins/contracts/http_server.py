@@ -15,7 +15,8 @@ from .http import Headers
 #   with an Allow header; a request it cannot read is 4xx; a body over max_body is 413; a handler that raises is 500
 #   for that request alone, and is reported on STDERR when there is one.
 #   The socket is bound while the server activates, and its address provided as SERVER_ADDRESS then; it serves from
-#   when the application has started. Unloaded, it stops accepting, lets requests in progress finish, and returns.
+#   then on, holding the runtime while it does. Unloaded, it stops accepting, lets requests in progress finish, and
+#   returns.
 #   It may add headers to a response, but never changes the status or body a handler returned.
 # Websockets are optional: a provider that serves them accepts a connection on a socket route in the table and hands it
 # to that route's handler, closing it once the handler returns; a handler that raises closes its connection with 1011
@@ -98,6 +99,10 @@ class RouteTable:
     # The value bound at ROUTES. Adding a route is an entry of its own, withdrawn by the inverse add returns, so
     # contributors come and go independently; two routes answering the same method and path are refused, as is a
     # path not starting with /, by add raising ValueError, which fails the contributor that tried.
+    # Withdrawing a route takes it out of the table at once, so no new request reaches it, and then waits for the
+    # calls of its handler still in progress, for as long as the runtime's grace: a contributor unloaded while a
+    # request is in flight, at any time and not only as the program ends, still answers it, with everything it
+    # required still there. A handler that waits for its own contributor to leave waits out that grace.
     add: Callable[[Route], Inverse]
     add_socket: Callable[[SocketRoute], Inverse]
     # Every route in the table now, in the order they were added.

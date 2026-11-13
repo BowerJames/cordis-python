@@ -4,7 +4,7 @@ from typing import Sequence
 
 from cordis import Component, Context, Fiber, FiberState, Runtime
 from cordis_loader import Entry, Loader
-from cordis_plugins import APPLICATION, EVENTS, ROUTES, Socket, SocketRoute, Topic
+from cordis_plugins import EVENTS, ROUTES, Socket, SocketRoute, Topic
 
 from ..contracts import (
     AGENT_TYPES,
@@ -48,7 +48,6 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
         agent_types: Catalog[AgentProfile] = catalog(lambda profile: profile.slug)
         ctx.provide(PROVIDERS, providers)
         ctx.provide(AGENT_TYPES, agent_types)
-        app = ctx.get(APPLICATION)
 
         async def tell[T](topic: Topic[T], event: T) -> None:
             events = ctx.find(EVENTS)
@@ -69,11 +68,13 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
             fiber = scoped.use(Component(f"session {connection.number}", apply=open_session,
                                          provides=(CONNECTION, TOOLS)))
 
-            def failed(error: Exception, where: str) -> None:
-                connection.failures.append(f"{error} (in {where})")
+            def failed(failing: Fiber, error: Exception) -> None:
+                connection.failures.append(f"{error} (in {failing.name})")
                 connection.finished.set()
 
-            release = app.contain(fiber, failed)
+            # Whatever fails in the session fails the session alone: it is told to this handler, not to whoever runs
+            # the server.
+            contained = ctx.contain(failed, fiber)
             try:
                 await ctx.runtime.settled(under=fiber)
                 if not connection.finished.is_set():
@@ -86,7 +87,7 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
                 await connection.finished.wait()
             finally:
                 await fiber.dispose()
-                release()
+                await contained.dispose()
 
         async def handle(socket: Socket) -> None:
             async def refuse(code: int, *messages: str) -> None:
@@ -123,4 +124,4 @@ def chat(session: Sequence[Entry], path: str = "/ws/chat") -> Component:
 
         ctx.effect(lambda: ctx.get(ROUTES).add_socket(SocketRoute(path, handle)), f"socket route {path}")
 
-    return Component("chat", apply=apply, requires=(APPLICATION, ROUTES), provides=(PROVIDERS, AGENT_TYPES))
+    return Component("chat", apply=apply, requires=(ROUTES,), provides=(PROVIDERS, AGENT_TYPES))

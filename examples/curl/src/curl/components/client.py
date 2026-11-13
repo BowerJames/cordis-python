@@ -3,7 +3,6 @@ from typing import Any
 
 from cordis import Component, Context
 from cordis_plugins import (
-    APPLICATION,
     ARGS,
     CLI,
     HTTP,
@@ -17,13 +16,12 @@ from cordis_plugins import (
     option,
     positional,
     repeated,
-    serve,
     switch,
 )
 
 
 class Abandoned(Exception):
-    # The application was ended while the request was still waiting, so it was given up.
+    # The run was ended while the request was still waiting, so it was given up.
     pass
 
 def seconds(text: str) -> float:
@@ -53,7 +51,8 @@ def register(ctx: Context, argument: Argument[Any]) -> None:
 
 def curl() -> Component:
     # Registers its arguments as it loads; the fetch is a child that requires the parsed arguments, so it activates
-    # once the command line has been parsed, and makes the one request the application exists for.
+    # once the command line has been parsed, and makes the one request the program exists for. The request is the only
+    # work that holds the runtime, so the program is done when it is.
     def fetch(ctx: Context) -> None:
         async def work(stopping: asyncio.Event) -> None:
             args = ctx.get(ARGS)
@@ -71,7 +70,7 @@ def curl() -> Component:
                 if not sending.done():
                     sending.cancel()
             if sending not in done:
-                raise Abandoned("the application ended before the response arrived")
+                raise Abandoned("the run ended before the response arrived")
             response = sending.result()
             write = ctx.get(STDOUT)
             if args(INCLUDE):
@@ -85,12 +84,12 @@ def curl() -> Component:
             if body and not body.endswith("\n") and ctx.get(STDOUT_IS_TERMINAL)():
                 write("\n")
 
-        serve(ctx, "fetch", work, after_start=False)
+        ctx.spawn(work, "fetch")
 
     def apply(ctx: Context) -> None:
         for argument in (URL, METHOD, HEADERS, DATA, INCLUDE, MAX_TIME):
             register(ctx, argument)
-        ctx.inject([APPLICATION, ARGS, HTTP, STDOUT, STDOUT_IS_TERMINAL], fetch, name="fetch")
+        ctx.inject([ARGS, HTTP, STDOUT, STDOUT_IS_TERMINAL], fetch, name="fetch")
 
     return Component("curl", apply=apply, requires=(CLI,))
 

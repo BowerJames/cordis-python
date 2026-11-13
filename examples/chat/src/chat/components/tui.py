@@ -15,7 +15,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from cordis import Component, Context
-from cordis_plugins import APPLICATION, SERVER_ADDRESS, serve
+from cordis_plugins import SERVER_ADDRESS
 
 from ..contracts import AGENT_TYPES, PROVIDERS
 
@@ -174,9 +174,10 @@ class ChatApp(App[None]):
 
 
 def tui(path: str = "/ws/chat", provider: str | None = None, model_name: str = "", agent_type: str | None = None) -> Component:
-    # A terminal client for the chat route, run once the application has started, offering the providers and agent
-    # types the server has. It talks to the server over a websocket like any other client; quitting it ends the
-    # application. It requires the server's address, so it closes before the server stops.
+    # A terminal client for the chat route, offering the providers and agent types the server has as it starts, so
+    # its entrypoint loads it once the rest has settled. It talks to the server over a websocket like any other client.
+    # The client is this component's work, done when it is quit: its entrypoint runs for as long as that work does,
+    # though the server would serve on. It requires the server's address, so it closes before the server stops.
     def apply(ctx: Context) -> None:
         async def run(stopping: asyncio.Event) -> None:
             address = ctx.get(SERVER_ADDRESS).replace("http://", "ws://", 1)
@@ -189,12 +190,10 @@ def tui(path: str = "/ws/chat", provider: str | None = None, model_name: str = "
             finally:
                 ending.cancel()
             if not running.done():
-                # The application is ending for some other reason, such as a signal: close the app, and give the
-                # terminal back.
+                # Told to stop for some other reason, such as a signal: close the app, and give the terminal back.
                 app.exit()
             await running
-            ctx.get(APPLICATION).end(0)
 
-        serve(ctx, "terminal client", run)
+        ctx.spawn(run, "terminal client")
 
-    return Component("tui", apply=apply, requires=(APPLICATION, SERVER_ADDRESS, PROVIDERS, AGENT_TYPES))
+    return Component("tui", apply=apply, requires=(SERVER_ADDRESS, PROVIDERS, AGENT_TYPES))

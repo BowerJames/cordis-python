@@ -22,4 +22,6 @@ Make every effect a function that returns its inverse (Definition 8): `ctx.effec
 
 Write a multi-step activation as a generator that yields each step's inverse as soon as the step is done. Between any two yields the runtime may stop, because the component's dependencies changed or it was retired, and recover exactly the steps taken (L-Divert). Where two steps must be released in a particular order that is not the reverse of acquisition, put both in one effect whose single inverse sequences them.
 
+A task is acquired like anything else: `ctx.spawn` starts work as an effect whose inverse tells it to stop and waits for it, so what was started before the work is released only once the work has left it (Done When Nothing Holds).
+
 Every registry method returns the inverse of the registration it made. Because the runtime cannot verify an inverse, test it: dispose the fiber, and observe that what it registered is gone.

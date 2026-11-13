@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from cordis import Component, Context
-from cordis_loader import Entry, patched
+from cordis_loader import Entry, describe, patched, without
 from cordis_plugins import (
     HTTP,
     SERVER_ADDRESS,
@@ -18,11 +18,10 @@ from cordis_plugins import (
     Captured,
     Request,
     capturing_stdio,
-    describe,
     httpx_http,
 )
-from cordis_plugins.testing import Steps, scenario
-from items.entrypoints.site_server import compose, run
+from cordis_plugins.testing import Steps, run_scenario
+from items.entrypoints.site_server import ARGS_ENTRY, compose, run
 
 
 def accepting(address: str) -> bool:
@@ -57,12 +56,18 @@ def probing_stdio(seen: dict[str, Any], captured: Captured) -> Callable[[], Comp
 
 async def site(argv: list[str], steps: Steps | None = None, database: Path | None = None,
                stdio: Callable[[], Component] | None = None) -> tuple[int, Captured]:
+    # Without steps, the entrypoint as shipped, which ends by itself when asked only for help or the routes. With
+    # them, the same composition loaded as the entrypoint loads it, the parser after the rest, and the run done when
+    # the steps are, though the server would serve on.
     capture, captured = capturing_stdio()
     entries = patched(compose(argv, database=database), Entry("stdio", stdio or capture))
-    if steps is not None:
-        entries = patched(entries, Entry("http", httpx_http),
-                          Entry("scenario", lambda: scenario(steps, requires=(HTTP, SERVER_ADDRESS))))
-    return await run(entries), captured
+    if steps is None:
+        return await run(entries), captured
+    entries = patched(entries, Entry("http", httpx_http))
+    outcome = await run_scenario(without(entries, ARGS_ENTRY), steps, requires=(HTTP, SERVER_ADDRESS),
+                                 then=[entry for entry in entries if entry.id == ARGS_ENTRY])
+    assert outcome.failures == ()
+    return outcome.status, captured
 
 
 @pytest.mark.external
@@ -113,8 +118,8 @@ async def test_discovery_deregisters_while_the_server_still_accepts() -> None:
 
 @pytest.mark.external
 async def test_help_works_while_the_port_is_already_in_use() -> None:
-    # Help ends the application before the command line is parsed, so the server, which needs the parsed options,
-    # is never loaded.
+    # Asked for help, the parser provides no arguments, so the server, which needs the parsed options, is never
+    # loaded, and with nothing holding the runtime the run is done.
     with socket.socket() as taken:
         taken.bind(("127.0.0.1", 0))
         taken.listen()
@@ -133,7 +138,7 @@ async def test_printing_routes_binds_nothing_and_registers_nothing() -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", free))  # still free: the server never bound it
 
-def test_the_parser_activates_before_what_registers_options_with_it() -> None:
+def test_the_argument_table_activates_before_what_registers_options_with_it() -> None:
     order = [line.split(". ")[1].split()[0] for line in describe(compose([])).split("\n\n")[0].splitlines()[1:]]
     assert order.index("cli") < order.index("server") and order.index("cli") < order.index("routes-command")
 
@@ -163,7 +168,7 @@ async def test_items_kept_in_a_database_are_served_again_after_a_restart(tmp_pat
     assert seen == [(201, {"id": 1, "name": "pen"}), (200, {"id": 1, "name": "pen"})]
 
 def test_every_entry_does_a_job_of_its_own() -> None:
-    # No entry exists only for wiring: the runner's application, then the composition, each with a component of its own.
+    # No entry exists only for wiring, and nothing is added to run them: each has a component of its own.
     assert [entry.id for entry in compose([])] == [
-        "stdio", "env", "cli", "routes", "server", "routes-command", "items", "items-api", "discovery",
+        "stdio", "env", "cli", "routes", "server", "routes-command", "items", "items-api", "discovery", "args",
     ]

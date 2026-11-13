@@ -4,9 +4,10 @@ from .component import Apply, Component
 from .effect import Activation, Inverse
 from .errors import InactiveAccess, ProvisionError, UndeclaredAccess
 from .key import Key, Metadata, Realm, RealmId
+from .work import Work, spawn
 
 if TYPE_CHECKING:
-    from .runtime import Effect, Fiber, Runtime
+    from .runtime import Effect, ErrorHandler, Fiber, Runtime
 
 T = TypeVar("T")
 
@@ -114,6 +115,26 @@ class Context:
             return withdraw
 
         return self.effect(install, f"provide {key.name}")
+
+    def hold(self, label: str = "hold") -> "Effect":
+        # Keeps the runtime from being done while this is in effect: for whatever this fiber is still doing that is not
+        # a task, such as a timer yet to fire or a server run by a library on a thread of its own. Unloading the fiber
+        # lets go, as does disposing the effect.
+        return self.effect(lambda: self.runtime.hold(self.fiber, label), f"hold {label}")
+
+    def spawn(self, work: Work, label: str = "work", *, hold: bool = True, grace: float | None = None) -> "Effect":
+        # Runs work as a task owned by this context's fiber: an effect whose inverse tells the work to stop, through
+        # the event it is given, and waits for it, cancelling it once its grace (the runtime's, unless given) runs out.
+        # While it runs it holds the runtime, unless hold is False, which is for work that runs beside what the
+        # composition is for and should not keep it going by itself. Work that raises fails this fiber's work alone:
+        # it is reported where the fiber's failures are.
+        return spawn(self, work, label, hold=hold, grace=grace)
+
+    def contain(self, handler: "ErrorHandler", fiber: "Fiber | None" = None) -> "Effect":
+        # Gives the failures of fiber (this context's own unless given), and of everything instantiated beneath it,
+        # to handler instead of whatever contains this fiber, while this is in effect.
+        contained = fiber if fiber is not None else self.fiber
+        return self.effect(lambda: self.runtime.contain(contained, handler), f"contain {contained.name}")
 
     def use(self, component: Component) -> "Fiber":
         # Instantiates component beneath this context's fiber (Definition 52). The instantiation is one of this

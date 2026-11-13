@@ -20,8 +20,9 @@ does so to follow the paper. Why it is built this way is in [`pattern_language/`
 [Every Registration Gets Its Own Ticket](pattern_language/commutative_keys.md),
 [Configuration is the Truth](pattern_language/configuration_is_the_truth.md),
 [Contracts Are Records](pattern_language/contracts_are_records.md),
-[Only Compositions Name Components](pattern_language/only_compositions_name_components.md) and
-[Realms, Not Wiring](pattern_language/realms_not_wiring.md).
+[Only Compositions Name Components](pattern_language/only_compositions_name_components.md),
+[Realms, Not Wiring](pattern_language/realms_not_wiring.md) and
+[Done When Nothing Holds](pattern_language/done_when_nothing_holds.md).
 
 ## Packages
 
@@ -29,9 +30,9 @@ This is a [uv](https://docs.astral.sh/uv/) workspace. The libraries are in `pack
 
 | Package | What it holds |
 |---|---|
-| [`cordis`](packages/cordis) | The kernel, with no dependencies: keys, effects, contexts, components, fibers and the runtime. |
+| [`cordis`](packages/cordis) | The kernel, with no dependencies: keys, effects, contexts, components, fibers and the runtime, with what holds it and when it is done. |
 | [`loader`](packages/loader) | `cordis_loader`: declarative configuration (§5.2.1), a tree of entries reconciled into fibers as it changes, and hot module replacement through those fibers (§5.2.2). |
-| [`cordis_plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: an application runner, stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, a health check and a server announcement, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers. |
+| [`cordis_plugins`](packages/plugins) | Contracts (keys and the promises behind them) and the components keeping them: stdio, the environment, an argparse command line, HTTP clients (httpx, requests) and servers (asyncio, FastAPI), a route table, a health check and a server announcement, an event bus, SQL on SQLite and Postgres, OpenAI clients and timers; and what an entrypoint runs a composition with, a failure handler and signals. |
 
 The examples are in `examples/`, each a project of its own built on those libraries, with its own `pyproject.toml`,
 scripts and tests. Each lays out its package the same way: `entrypoints/` holds a module per deliverable, each building
@@ -92,6 +93,36 @@ states, and who provides what.
 There is no boot order: the printer waits until the greeting is provided. Disposing the greeter first stops it
 providing (`L-Leave`), lets the printer unload while the greeting is still bound, and only then withdraws it
 (`L-Unload`, behind its guard).
+
+## Running until done
+
+Node ends a process when no handle keeps it alive; asyncio ends a program when its main coroutine returns, whatever
+else is running. So a fiber that is still doing something holds the runtime, and whoever runs a composition waits for
+the runtime to be done: settled, with nothing held.
+
+```python
+def server() -> Component:
+    def apply(ctx: Context) -> None:
+        async def serving(stopping: asyncio.Event) -> None:
+            ...                      # accept until told to stop, then let requests in progress finish
+        ctx.spawn(serving, "http server")    # a task as an effect: holds while it runs, stopped as the fiber unloads
+    return Component("server", apply=apply)
+
+async def main() -> int:
+    failed = StopOnFailure()                 # keeps what fails, and asks the runtime to stop at the first
+    async with open_runtime(on_error=failed) as runtime:
+        with stop_on_signals(runtime):       # so does a first SIGINT or SIGTERM
+            await Loader(runtime.root).load(entries)
+            await runtime.done()             # nothing holds it any more, or it was asked to stop
+    return failed.status()                   # leaving the block unloaded everything, dependents first
+```
+
+`ctx.spawn(work, label, hold=False)` is for work beside what the composition is for, which should not keep it running;
+`ctx.hold(label)` holds without a task, for a timer yet to fire; `runtime.done(under=fiber)` waits for one part of a
+composition, such as a terminal client beside a server; and `ctx.contain(handler, fiber)` gives a fiber's failures to
+a handler, so one session fails alone. What must come after everything else, such as the parser of a command line,
+the entrypoint loads once the rest has settled. [Done When Nothing Holds](pattern_language/done_when_nothing_holds.md)
+says why each is where it is.
 
 ## From the paper to the code
 
@@ -164,7 +195,7 @@ can be changed while the application runs, where the microkernel plans a fixed b
 | a slot, contributed before boot and collected | a key whose value is a table, each addition its own entry and its own effect (`RouteTable`, `Catalog`, `Arguments`, `Events`) |
 | adapting a capability (`verbose` wrapping the HTTP requester) | observing it: `HTTP.observe` is a registration of its own, so it needs no place in any order |
 | `server_cli` adapting the environment for the server | `server_cli` instantiating the server once the command line is parsed, with host and port bound into it |
-| services, `END`, `STARTED`, `kernel.run()` | `run_application(entries)`: `serve(ctx, label, work)` for running work, `APPLICATION.end`, `when_started`; ending stops served work in dependency order, then unloads everything |
+| services, `END`, `STARTED`, `kernel.run()` | `ctx.spawn(work, label)` for running work, which holds the runtime; the entrypoint waits for `runtime.done()` and loads what must start last once the rest has settled; closing the runtime unloads everything, and stops its work, in dependency order |
 | a scope opened per websocket connection | a session group whose session keys are isolated into realms of its own; its failures are contained to it |
 
 Some behaviour comes from the framework rather than from the examples: routes live in their own table, so a server
@@ -186,7 +217,8 @@ uv run ruff check
 The tests are organised by what the paper proves: `test_effect.py` (§3.1), `test_coeffects.py` (§3.2 and the
 access discipline of Algorithm 6), `test_lifecycle.py` (the rules of §4.2 and Theorems 70–71), `test_recovery.py`
 (Theorems 43 and 68), `test_failures.py` and `test_isolation.py` (§4.4), `test_instantiation.py` (Def. 52), and
-`test_metatheory.py` (Theorems 73 and 80, and cycles from §6.5), `test_describe.py` and `test_revision.py`. The
+`test_metatheory.py` (Theorems 73 and 80, and cycles from §6.5), `test_describe.py` and `test_revision.py`;
+`test_work.py` covers what the paper leaves to the host: holding, being done, work and containing failures. The
 loader's tests reconcile configurations against loading them from scratch (Theorem 80 again), and its HMR tests
 replace real modules written to a temporary package, including a failed import that rolls back.
 
@@ -197,6 +229,9 @@ replace real modules written to a temporary package, including a failed import t
 - A failed fiber is not retried until it is revised (§4.4); `fiber.revise()` is that revision.
 - Hot module replacement invalidates only the modules on a way from an entry to a change, rather than the entry's
   whole import tree: a key's identity is the object its module made, and Python cannot re-make it equal.
+- When a program is over is said here, where Node says it for Cordis: fibers hold the runtime while they are doing
+  something, and the entrypoint waits for it to be done, then unloads everything, which Cordis leaves to the process
+  ending.
 
 The Postgres tests need a server they may do anything to. They use the one `TEST_POSTGRES_DSN` names, or start a
 throwaway `postgres:17-alpine` in Docker, and skip when there is neither.
