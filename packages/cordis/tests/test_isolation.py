@@ -1,4 +1,4 @@
-from cordis import Component, Context, FiberState, Key, Metadata, Realm, Runtime
+from cordis import Component, Context, FiberState, Inverse, Key, Metadata, Realm, Runtime
 
 from .helpers import state
 
@@ -6,8 +6,8 @@ STORAGE: Key[str] = Key("storage")
 FILES: Key[str] = Key("files")
 
 def storage(path: str) -> Component:
-    def apply(ctx: Context) -> None:
-        ctx.provide(STORAGE, path)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(STORAGE, path)
     return Component(f"storage {path}", apply=apply, provides=(STORAGE,))
 
 def bot(name: str, seen: list[str]) -> Component:
@@ -51,11 +51,11 @@ async def test_interception_merges_declared_metadata_under_the_contexts(runtime:
     # component uses a coeffect without changing either party.
     served: list[Metadata] = []
 
-    def files(ctx: Context) -> None:
+    def files(ctx: Context) -> Inverse:
         def serve(metadata: Metadata) -> str:
             served.append(metadata)
             return "read-only" if metadata.get("readonly") else "read-write"
-        ctx.provide_by(FILES, serve)
+        return ctx.provide_by(FILES, serve)
 
     modes: list[str] = []
     runtime.root.use(Component("files", apply=files, provides=(FILES,)))

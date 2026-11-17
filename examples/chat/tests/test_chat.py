@@ -2,7 +2,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, Mapping
+from typing import Any, AsyncIterator, Awaitable, Callable, Iterator, Mapping
 
 import pytest
 
@@ -10,7 +10,7 @@ from chat.components import workspace
 from chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, ToolCall, Turn
 from chat.entrypoints import tui
 from chat.entrypoints.server import compose, with_a_session
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry, patched, without
 from cordis_plugins import (
     APPLICATION,
@@ -18,11 +18,11 @@ from cordis_plugins import (
     SERVER_ADDRESS,
     Socket,
     SocketHandler,
+    background,
     capturing_stdio,
     describe,
     environment,
     run_application,
-    serve,
 )
 
 
@@ -69,8 +69,8 @@ def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Compone
     # Stands in for the HTTP server without a socket: hands /ws/chat connections made in memory to the socket route in
     # the table, runs the conversation once the application has started, then ends the application and, like a real
     # server, lets its connections finish as it is told to stop.
-    def apply(ctx: Context) -> None:
-        ctx.provide(SERVER_ADDRESS, "memory://")
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.provide(SERVER_ADDRESS, "memory://")
         clients: list[Client] = []
 
         def connect(query: Mapping[str, str]) -> Client:
@@ -80,12 +80,14 @@ def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Compone
             return clients[-1]
 
         async def serving(stopping: asyncio.Event) -> None:
+            if not await ctx.get(APPLICATION).started():
+                return
             await conversation(connect)
             ctx.get(APPLICATION).end(0)
             await stopping.wait()
             await asyncio.gather(*(client.task for client in clients))
 
-        serve(ctx, "memory server", serving)
+        yield background(ctx, "memory server", serving)
 
     return Component("memory server", apply=apply, requires=(APPLICATION, ROUTES), provides=(SERVER_ADDRESS,))
 
@@ -98,8 +100,8 @@ def scripted(replies: list[AssistantMessage], turns: list[Turn]) -> Component:
             return replies.pop(0)
         yield respond
 
-    def apply(ctx: Context) -> None:
-        ctx.effect(lambda: ctx.get(PROVIDERS).offer(Provider("scripted", connect)))
+    def apply(ctx: Context) -> Inverse:
+        return ctx.get(PROVIDERS).offer(Provider("scripted", connect))
 
     return Component("scripted", apply=apply, requires=(PROVIDERS,))
 
@@ -141,9 +143,9 @@ def test_describe_shows_what_loads_in_each_session_and_what_is_on_offer() -> Non
     assert "  agent_types                    provided by chat; required by explorer, reader, harness" in described
     assert "  connection in each-session     provided by opening; required by model, harness" in described
 
-def test_chat_only_uses_an_event_bus_and_the_terminal_client_goes_without_the_session_log() -> None:
+def test_chat_needs_no_session_log_and_the_terminal_client_goes_without_one() -> None:
     from chat.components import chat
-    assert "events" not in {key.name for key in chat(session=[]).requires}
+    assert "session_log" not in {key.name for key in chat(session=[]).requires}
     described = describe(tui.compose())
     assert "tui" in described and "session-log" not in described
 
@@ -363,7 +365,7 @@ async def test_a_refused_connection_opens_no_session_and_is_not_logged(root: Pat
     assert sessions_logged(captured.stdout) == []
 
 async def test_a_session_ended_by_the_server_ending_is_still_logged_as_closed(root: Path) -> None:
-    # The connection finishes while the server's services are ending, after the bus's own service has ended.
+    # Everything is unloaded at once as the application ends; the log stays until the session has said it closed.
     stdio, captured = capturing_stdio()
 
     async def conversation(connect: Connect) -> None:
@@ -389,13 +391,15 @@ async def test_ending_the_server_ends_open_sessions_first(root: Path) -> None:
 def real(root: Path, replies: list[AssistantMessage], client: Callable[[Context], Awaitable[None]]) -> list[Entry]:
     # The real chat server on a free port, with a client component talking to it once the application has started.
     def talking() -> Component:
-        def apply(ctx: Context) -> None:
+        def apply(ctx: Context) -> Inverse:
             async def talk(stopping: asyncio.Event) -> None:
+                if not await ctx.get(APPLICATION).started():
+                    return
                 try:
                     await client(ctx)
                 finally:
                     ctx.get(APPLICATION).end(0)
-            serve(ctx, "client", talk)
+            return background(ctx, "client", talk)
         return Component("client", apply=apply, requires=(APPLICATION, SERVER_ADDRESS))
 
     return patched(compose(port=0), Entry("stdio", capturing_stdio()[0]), Entry("env", lambda: environment({})),

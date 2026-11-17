@@ -1,4 +1,4 @@
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 
 from ..contracts import STORE, Store
 
@@ -12,7 +12,7 @@ class _Memory:
         return self._counts[name]
 
 def memory_store() -> Component:
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         memory = _Memory()
-        ctx.provide(STORE, Store(increment=memory.increment))
+        return ctx.provide(STORE, Store(increment=memory.increment))
     return Component("memory store", apply=apply, provides=(STORE,))

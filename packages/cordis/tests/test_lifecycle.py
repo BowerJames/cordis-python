@@ -9,10 +9,10 @@ DATABASE: Key[dict[str, str]] = Key("database")
 CHAT: Key[str] = Key("chat")
 
 def database(log: list[str], value: dict[str, str] | None = None, name: str = "database") -> Component:
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         log.append(f"{name} up")
-        ctx.provide(DATABASE, value if value is not None else {"greeting": "hello"})
-        ctx.effect(lambda: lambda: log.append(f"{name} down"))
+        yield ctx.provide(DATABASE, value if value is not None else {"greeting": "hello"})
+        yield lambda: log.append(f"{name} down")
     return Component(name, apply=apply, provides=(DATABASE,))
 
 def reader(log: list[str]) -> Component:
@@ -85,10 +85,10 @@ async def test_providers_are_compared_by_identity_not_by_value(runtime: Runtime)
 async def test_dependents_unload_in_a_cascade_and_providers_go_last(runtime: Runtime) -> None:
     log: list[str] = []
 
-    def chat(ctx: Context) -> Inverse:
-        ctx.provide(CHAT, f"chat over {ctx.get(DATABASE)['greeting']}")
+    def chat(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.provide(CHAT, f"chat over {ctx.get(DATABASE)['greeting']}")
         log.append("chat up")
-        return lambda: log.append("chat down")
+        yield lambda: log.append("chat down")
 
     def history(ctx: Context) -> Inverse:
         log.append(f"history up: {ctx.get(CHAT)}")
@@ -164,9 +164,9 @@ async def test_transitions_are_recorded_before_they_run_even_when_tasks_start_ea
     try:
         log: list[str] = []
 
-        def group(ctx: Context) -> None:
-            ctx.use(database(log))
-            ctx.use(reader(log))
+        def group(ctx: Context) -> Iterator[Inverse]:
+            yield ctx.use(database(log)).retire
+            yield ctx.use(reader(log)).retire
 
         fiber = runtime.root.use(Component("group", apply=group))
         await runtime.settled()

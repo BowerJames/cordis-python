@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 
-from cordis import Component, Context, Entries, Inverse
+from cordis import Component, Context, Entries, Inverse, Undo
 
 from ..contracts import EVENTS, EventHandler, Events, Topic
 
@@ -16,8 +16,8 @@ class _LocalEvents:
     def __init__(self) -> None:
         self._topics: dict[Topic[Any], Entries[EventHandler[Any]]] = {}
 
-    def subscribe[T](self, topic: Topic[T], handler: EventHandler[T], /) -> Inverse:
-        return self._topics.setdefault(topic, Entries()).add(handler)
+    def subscribe[T](self, topic: Topic[T], handler: EventHandler[T], /) -> Undo:
+        return self._topics.setdefault(topic, Entries()).add(handler, f"subscribe to {topic.name}")
 
     async def publish[T](self, topic: Topic[T], event: T, /) -> None:
         called: tuple[EventHandler[T], ...] = tuple(self._topics.get(topic, ()))
@@ -41,9 +41,9 @@ class _LocalEvents:
             raise ExceptionGroup(f"handlers of {topic.name} failed", failures)
 
 def event_bus() -> Component:
-    # Delivers each event to the handlers subscribed to its topic. A subscription is an effect of the subscriber, so
+    # Delivers each event to the handlers subscribed to its topic. A subscriber yields its subscription's inverse, so
     # a subscriber that unloads stops receiving, and one that loads later starts; there is nothing to declare up front.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         events = _LocalEvents()
-        ctx.provide(EVENTS, Events(subscribe=events.subscribe, publish=events.publish))
+        return ctx.provide(EVENTS, Events(subscribe=events.subscribe, publish=events.publish))
     return Component("event bus", apply=apply, provides=(EVENTS,))

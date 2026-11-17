@@ -1,15 +1,17 @@
 # The server contract, kept by both servers, over real sockets: each test runs against each provider.
-from typing import Any, AsyncIterator
+import asyncio
+from typing import Any, AsyncIterator, Iterator
 
 import pytest
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry, Loader, patched
 from cordis_plugins import (
     HTTP,
     ROUTES,
     SERVER_ADDRESS,
     STDERR,
+    Matched,
     Request,
     Route,
     RouteTable,
@@ -33,13 +35,10 @@ async def broken(request: ServerRequest) -> ServerResponse:
     raise RuntimeError("handler broke")
 
 def routes(added: list[Route]) -> Component:
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         for route in added:
-            add(ctx, route)
+            yield ctx.get(ROUTES).add(route)
     return Component("routes contributor", apply=apply, requires=(ROUTES,))
-
-def add(ctx: Context, route: Route) -> None:
-    ctx.effect(lambda: ctx.get(ROUTES).add(route))
 
 @pytest.fixture(params=[asyncio_http_server, fastapi_http_server], ids=["asyncio", "fastapi"])
 def server(request: pytest.FixtureRequest) -> Any:
@@ -132,14 +131,49 @@ async def table(request: pytest.FixtureRequest) -> AsyncIterator[RouteTable]:
         yield kept
 
 async def test_two_routes_answering_the_same_method_and_path_are_refused(table: RouteTable) -> None:
-    table.add(Route("GET", "/a", greet))
+    withdraw = table.add(Route("GET", "/a", greet))
     with pytest.raises(ValueError, match="two routes answer GET /a"):
         table.add(Route("get", "/a", greet))
     with pytest.raises(ValueError, match="must start with /"):
         table.add(Route("GET", "a", greet))
+    withdraw()
 
 async def test_withdrawn_routes_free_their_method_and_path(table: RouteTable) -> None:
     withdraw = table.add(Route("GET", "/a", greet))
     withdraw()
-    table.add(Route("GET", "/a", greet))
+    again = table.add(Route("GET", "/a", greet))
     assert [str(route) for route in table.routes()] == ["GET /a"]
+    again()
+
+async def test_withdrawing_a_route_takes_it_out_at_once_and_waits_for_the_requests_it_is_answering(
+    table: RouteTable,
+) -> None:
+    # The contributor finishes what it took on while still loaded: withdrawal waits for the route's calls in flight.
+    gate = asyncio.Event()
+
+    async def slow(request: ServerRequest) -> ServerResponse:
+        await gate.wait()
+        return ServerResponse.text("late")
+
+    withdraw = table.add(Route("GET", "/slow", slow))
+    found = table.match("GET", "/slow")
+    assert isinstance(found, Matched)
+    answering = asyncio.ensure_future(found.route.handle(ServerRequest("GET", "/slow")))
+    await asyncio.sleep(0)
+    draining = withdraw()
+    assert table.routes() == () and table.match("GET", "/slow") is None
+    assert draining is not None
+    waiting = asyncio.ensure_future(draining)
+    await asyncio.sleep(0.01)
+    assert not waiting.done()
+    gate.set()
+    assert (await answering).body == b"late"
+    await waiting
+
+async def test_withdrawing_a_route_with_nothing_in_flight_is_done_at_once(table: RouteTable) -> None:
+    async def quick(request: ServerRequest) -> ServerResponse:
+        return ServerResponse.text("quick")
+
+    withdraw = table.add(Route("GET", "/quick", quick))
+    assert withdraw() is None
+    assert table.routes() == ()

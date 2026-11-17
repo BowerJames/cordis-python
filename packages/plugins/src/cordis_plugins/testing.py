@@ -2,11 +2,11 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Awaitable, Callable, Sequence
 
-from cordis import Component, Context, Key, open_runtime
+from cordis import Component, Context, Inverse, Key, open_runtime
 from cordis_loader import Entry, patched
 
 from .components import Outcome, run_application
-from .contracts import APPLICATION, serve
+from .contracts import APPLICATION, background
 
 # For testing compositions as they run: a component that, once the application has started, runs steps with the ctx it
 # was given, then ends the application. Whatever the steps need, the component requires, so it starts only once that
@@ -15,20 +15,22 @@ from .contracts import APPLICATION, serve
 type Steps = Callable[[Context], Awaitable[None]]
 
 def scenario(steps: Steps, requires: Sequence[Key[Any]] = ()) -> Component:
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         async def go(stopping: asyncio.Event) -> None:
+            app = ctx.get(APPLICATION)
+            if not await app.started():
+                return
             try:
                 await steps(ctx)
             finally:
-                ctx.get(APPLICATION).end(0)
-        serve(ctx, "scenario", go)
+                app.end(0)
+        return background(ctx, "scenario", go)
     return Component("scenario", apply=apply, requires=(APPLICATION, *requires))
 
-async def run_scenario(entries: Sequence[Entry], steps: Steps, requires: Sequence[Key[Any]] = (),
-                       grace: float = 5.0) -> Outcome:
+async def run_scenario(entries: Sequence[Entry], steps: Steps, requires: Sequence[Key[Any]] = ()) -> Outcome:
     # Runs entries with a scenario added, and gives the outcome; a failure in the steps is among its failures.
     return await run_application(patched(entries, Entry("scenario", lambda: scenario(steps, requires))),
-                                 grace=grace, signals=False)
+                                 signals=False)
 
 @asynccontextmanager
 async def provided[T](key: Key[T], component: Callable[[], Component]) -> AsyncIterator[T]:

@@ -1,10 +1,10 @@
 import asyncio
 import json
 from contextlib import suppress
-from typing import Any, Awaitable
+from typing import Any, Awaitable, Iterator
 
-from cordis import Component, Context
-from cordis_plugins import APPLICATION, serve
+from cordis import Component, Context, Inverse
+from cordis_plugins import background
 
 from ..contracts import (
     AGENT_TYPES,
@@ -41,9 +41,9 @@ def harness() -> Component:
     # The agent loop: takes each message from the connection, and asks the model until it stops calling tools. It runs
     # the agent type the session asked for, with the tools of that type offered in the session, and lets them put notes
     # into the agent's context. The loop is served work of this fiber, so unloading the session ends it.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         notes: list[Note] = []
-        ctx.provide(INJECT, lambda text: notes.append(Note(text)))
+        yield ctx.provide(INJECT, lambda text: notes.append(Note(text)))
         connection = ctx.get(CONNECTION)
 
         async def loop(stopping: asyncio.Event) -> None:
@@ -117,7 +117,7 @@ def harness() -> Component:
             finally:
                 connection.finished.set()
 
-        serve(ctx, "agent loop", run, after_start=False)
+        yield background(ctx, "agent loop", run)
 
-    return Component("harness", apply=apply, requires=(APPLICATION, CONNECTION, MODEL, AGENT_TYPES, TOOLS),
+    return Component("harness", apply=apply, requires=(CONNECTION, MODEL, AGENT_TYPES, TOOLS),
                      provides=(INJECT,))

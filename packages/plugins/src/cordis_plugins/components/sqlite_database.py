@@ -64,6 +64,6 @@ def sqlite_database(path: str | Path = ":memory:") -> Component:
                     held = False
                     holder = None
 
-        ctx.provide(SQLITE, SqliteDatabase(path=chosen, run=run, hold=hold))
+        yield ctx.provide(SQLITE, SqliteDatabase(path=chosen, run=run, hold=hold))
 
     return Component("sqlite database", apply=apply, provides=(SQLITE,))

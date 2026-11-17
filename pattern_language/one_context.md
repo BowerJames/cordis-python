@@ -18,7 +18,7 @@ A runtime can only revert the changes it can see, and only follow the dependenci
 
 ## Solution
 
-Give every component exactly one way to touch the world: its `Context`. What it reads it declares in `requires` and reads with `ctx.get`; what it shares it declares in `provides` and installs with `ctx.provide`; anything else it changes it changes inside `ctx.effect`, returning the undo; anything it loads it loads with `ctx.use`. This is the paper's context paradigm (§3.3): a component's behaviour is built from those stages alone (Definitions 30 and 56), and confinement follows from that form (Lemma 57).
+Give every component exactly one way to touch the world: its `Context`. What it reads it declares in `requires` and reads with `ctx.get`; what it shares it declares in `provides` and installs with `ctx.provide`; anything it loads it loads with `ctx.use`; and for anything it changes, these included, it yields the undo from its effect function (Every Act Carries Its Undo). This is the paper's context paradigm (§3.3): a component's behaviour is built from those stages alone (Definitions 30 and 56), and confinement follows from that form (Lemma 57).
 
 What a component provides is frozen (Contracts Are Records), so it changes only by being withdrawn and provided anew. That is the only change its dependents could follow: the runtime follows which fiber provides a key, not what the binding holds (§5.1.3), so a binding overwritten in place would never reach them.
 

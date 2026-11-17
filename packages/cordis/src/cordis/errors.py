@@ -23,3 +23,12 @@ class InsertionError(CordisError):
 class InactiveEffect(CordisError):
     # An effect performed on a context whose fiber is neither activating nor active, so nothing would ever revert it.
     pass
+
+class UnyieldedInverse(CordisError):
+    # An effect whose inverse its component neither yielded nor adopted: at the next seam of an activation, which
+    # fails it, or by the time the fiber unloads. Either way the runtime still applies the inverse.
+    pass
+
+class DroppedInverse(RuntimeWarning):
+    # An inverse nobody ever held: it was let go without being yielded, adopted or applied, so its effect stays.
+    pass

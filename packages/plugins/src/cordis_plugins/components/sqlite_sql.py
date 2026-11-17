@@ -3,7 +3,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from types import MappingProxyType
 from typing import AsyncGenerator, Awaitable, Callable
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 
 from ..contracts import SQL, SQLITE, ConstraintViolation, Parameters, Row, Sql, SqlError, SqliteRun
 
@@ -79,7 +79,7 @@ async def _transaction(run: SqliteRun, depth: int) -> AsyncGenerator[Sql, None]:
 def sqlite_sql() -> Component:
     # The SQL contract over a SQLite connection. A transaction holds the connection until it ends, so statements
     # outside it wait, and only ever see it before it began or after it ended.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         database = ctx.get(SQLITE)
 
         @asynccontextmanager
@@ -87,6 +87,6 @@ def sqlite_sql() -> Component:
             async with database.hold() as held, _transaction(held, 1) as sql:
                 yield sql
 
-        ctx.provide(SQL, _sql(database.run, transaction))
+        return ctx.provide(SQL, _sql(database.run, transaction))
 
     return Component("sqlite sql", apply=apply, requires=(SQLITE,), provides=(SQL,))

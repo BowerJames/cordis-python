@@ -5,7 +5,7 @@ import signal
 
 import pytest
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry, patched
 from cordis_plugins import (
     HTTP,
@@ -179,8 +179,8 @@ def never_answers() -> Component:
         await asyncio.Event().wait()
         raise AssertionError("never answered")
 
-    def apply(ctx: Context) -> None:
-        ctx.provide(HTTP, observed_client(request))
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(HTTP, observed_client(request))
     return Component("never answers", apply=apply, provides=(HTTP,))
 
 async def test_ctrl_c_gives_up_the_request_at_once_and_exits_130(capsys: pytest.CaptureFixture[str]) -> None:

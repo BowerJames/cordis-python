@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol, overload
 
-from cordis import Inverse, Key
+from cordis import Key, Undo
 
 # A command line assembled from what the running components register, then parsed once the application has started.
 # Registering an argument is an effect of the component registering it, so a component that is not loaded has no
@@ -43,7 +43,7 @@ def switch(name: str, flags: tuple[str, ...], help: str) -> Argument[bool]:
 class Arguments:
     # The value bound at CLI: add registers an argument until the inverse it returns is applied. Each registration is
     # an entry of its own, so registrations from different components are independent of each other.
-    add: Callable[[Argument[Any]], Inverse]
+    add: Callable[[Argument[Any]], Undo]
 
 class ReadArgument(Protocol):
     # Looks up the value of an argument: args(URL) -> str.

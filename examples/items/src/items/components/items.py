@@ -1,5 +1,5 @@
 import json
-from typing import AsyncIterator
+from typing import AsyncIterator, Iterator
 
 from cordis import Component, Context, Inverse
 from cordis_plugins import ROUTES, SERVER_ADDRESS, SQL, Route, ServerRequest, ServerResponse
@@ -9,7 +9,7 @@ from ..contracts import ITEMS, Item, Items
 
 def items_store() -> Component:
     # Items kept in memory, for as long as the component is loaded.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         added: dict[int, Item] = {}
 
         async def add(name: str) -> Item:
@@ -20,7 +20,7 @@ def items_store() -> Component:
         async def get(id: int) -> Item | None:
             return added.get(id)
 
-        ctx.provide(ITEMS, Items(add=add, get=get))
+        return ctx.provide(ITEMS, Items(add=add, get=get))
     return Component("items store", apply=apply, provides=(ITEMS,))
 
 def sql_items_store() -> Component:
@@ -54,19 +54,15 @@ def sql_items_store() -> Component:
             rows = await sql.fetch("SELECT id, name FROM items WHERE id = :id", {"id": id})
             return Item(id=rows[0]["id"], name=rows[0]["name"]) if rows else None
 
-        ctx.provide(ITEMS, Items(add=add, get=get))
+        yield ctx.provide(ITEMS, Items(add=add, get=get))
 
     return Component("sql items store", apply=apply, requires=(SQL,), provides=(ITEMS,))
-
-def serve_route(ctx: Context, route: Route) -> None:
-    # A route is an effect of the component adding it, withdrawn as it unloads.
-    ctx.effect(lambda: ctx.get(ROUTES).add(route), f"route {route}")
 
 def items_api() -> Component:
     # Adds its routes, and requires the items they serve: give it another store and it reloads against the new one, by
     # itself. The server's address is read as each item is created, from whichever server is answering, so the routes
     # are in the table whether or not any server is loaded.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         async def add(request: ServerRequest) -> ServerResponse:
             try:
                 name = json.loads(request.body)["name"]
@@ -85,7 +81,8 @@ def items_api() -> Component:
                 return ServerResponse.json({"error": "no such item"}, status=404)
             return ServerResponse.json({"id": item.id, "name": item.name})
 
-        for route in (Route("POST", "/items", add), Route("GET", "/items/{id}", get)):
-            serve_route(ctx, route)
+        # Each route is withdrawn as the component unloads: adding it gives back its inverse, yielded here.
+        yield ctx.get(ROUTES).add(Route("POST", "/items", add))
+        yield ctx.get(ROUTES).add(Route("GET", "/items/{id}", get))
 
     return Component("items api", apply=apply, requires=(ROUTES, ITEMS))

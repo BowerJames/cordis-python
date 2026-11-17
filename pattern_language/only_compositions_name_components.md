@@ -19,7 +19,7 @@ A component module that imports another component, even only as a default, choos
 
 ## Solution
 
-Let imports run one way. A contract module imports the kernel and other contracts. A component module imports contracts, together with the helpers that use them, which live in the contract module beside the key they serve: `serve` reaches nothing but `APPLICATION`, so it belongs to that contract, and a server serving requests imports it from there rather than from the runner. Only compositions import components.
+Let imports run one way. A contract module imports the kernel and other contracts. A component module imports contracts, together with the helpers that use them, which live in the contract modules beside what they serve: `background` runs a fiber's work and needs no keeper at all, so a server imports it from the contracts rather than from any component. Only compositions import components.
 
 Lay a project out along the same line, so the direction can be read from the folders: `contracts/` holds the keys its components meet on, with the records bound at them; `components/` holds the components, each module importing from `contracts/`, from the libraries' contracts, and from plain helpers beside it; and `entrypoints/` holds a module per deliverable, building its composition and running it, the only place components are named. A project whose components keep only contracts it gets from a library has no `contracts/` of its own. Each project under `examples/` is laid out this way.
 

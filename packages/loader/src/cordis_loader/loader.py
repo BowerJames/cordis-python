@@ -187,6 +187,9 @@ class Loader:
         for key, mode in entry.isolate.items():
             ctx = ctx.isolate(key, self._realm(entry, key, mode))
         node.fiber = ctx.layered(node.intercepts).use(self._component(node))
+        # The loader orchestrates beneath its parent's context, with no effect function to yield from: the parent
+        # adopts each child's retire, and disabling an entry applies it early.
+        parent.ctx.adopt(node.fiber.retire)
 
     def _component(self, node: _Node) -> Component:
         if node.entry.children is not None:

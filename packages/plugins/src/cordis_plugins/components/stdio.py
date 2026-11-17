@@ -1,7 +1,7 @@
 import os
 import sys
 from dataclasses import dataclass
-from typing import Callable, Mapping, TextIO
+from typing import Callable, Iterator, Mapping, TextIO
 
 from cordis import Component, Context, Inverse
 
@@ -18,17 +18,17 @@ def _writing_to(stream: Callable[[], TextIO]) -> Write:
     return write
 
 def stdio() -> Component:
-    def apply(ctx: Context) -> Inverse:
-        ctx.provide(STDOUT, _writing_to(lambda: sys.stdout))
-        ctx.provide(STDERR, _writing_to(lambda: sys.stderr))
-        ctx.provide(STDOUT_IS_TERMINAL, lambda: sys.stdout.isatty())
-        ctx.provide(STDERR_IS_TERMINAL, lambda: sys.stderr.isatty())
-
+    def apply(ctx: Context) -> Iterator[Inverse]:
         def flush() -> None:
             sys.stdout.flush()
             sys.stderr.flush()
 
-        return flush
+        # Flushed last, once nothing provided here can be written to any more.
+        yield flush
+        yield ctx.provide(STDOUT, _writing_to(lambda: sys.stdout))
+        yield ctx.provide(STDERR, _writing_to(lambda: sys.stderr))
+        yield ctx.provide(STDOUT_IS_TERMINAL, lambda: sys.stdout.isatty())
+        yield ctx.provide(STDERR_IS_TERMINAL, lambda: sys.stderr.isatty())
     return Component("stdio", apply=apply, provides=_STREAMS)
 
 @dataclass(slots=True)
@@ -48,17 +48,17 @@ def capturing_stdio(terminal: bool = False) -> tuple[Callable[[], Component], Ca
     def to_stderr(text: str) -> None:
         captured.stderr += text
 
-    def apply(ctx: Context) -> None:
-        ctx.provide(STDOUT, to_stdout)
-        ctx.provide(STDERR, to_stderr)
-        ctx.provide(STDOUT_IS_TERMINAL, lambda: terminal)
-        ctx.provide(STDERR_IS_TERMINAL, lambda: terminal)
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.provide(STDOUT, to_stdout)
+        yield ctx.provide(STDERR, to_stderr)
+        yield ctx.provide(STDOUT_IS_TERMINAL, lambda: terminal)
+        yield ctx.provide(STDERR_IS_TERMINAL, lambda: terminal)
 
     return lambda: Component("capturing stdio", apply=apply, provides=_STREAMS), captured
 
 def get_env_os() -> Component:
-    def apply(ctx: Context) -> None:
-        ctx.provide(GET_ENV, os.getenv)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(GET_ENV, os.getenv)
     return Component("env os", apply=apply, provides=(GET_ENV,))
 
 def environment(variables: Mapping[str, str]) -> Component:
@@ -68,6 +68,6 @@ def environment(variables: Mapping[str, str]) -> Component:
     def get_env(name: str) -> str | None:
         return fixed.get(name)
 
-    def apply(ctx: Context) -> None:
-        ctx.provide(GET_ENV, get_env)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(GET_ENV, get_env)
     return Component("environment", apply=apply, provides=(GET_ENV,))

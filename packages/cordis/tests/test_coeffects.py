@@ -1,3 +1,5 @@
+from typing import Iterator
+
 import pytest
 
 from cordis import (
@@ -7,6 +9,7 @@ from cordis import (
     InactiveAccess,
     InactiveEffect,
     InsertionError,
+    Inverse,
     Key,
     ProvisionError,
     Runtime,
@@ -19,8 +22,8 @@ NUMBER: Key[int] = Key("number")
 OTHER: Key[int] = Key("other")
 
 def provider(value: int = 1, name: str = "provider", key: Key[int] = NUMBER) -> Component:
-    def apply(ctx: Context) -> None:
-        ctx.provide(key, value)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(key, value)
     return Component(name, apply=apply, provides=(key,))
 
 
@@ -55,8 +58,8 @@ async def test_find_probes_without_committing(runtime: Runtime) -> None:
     assert runtime.root.find(NUMBER) is None
 
 async def test_a_key_outside_the_provision_cannot_be_provided(runtime: Runtime, failures: object) -> None:
-    def apply(ctx: Context) -> None:
-        ctx.provide(OTHER, 1)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(OTHER, 1)
 
     fiber = runtime.root.use(Component("overreaching", apply=apply, provides=(NUMBER,)))
     await runtime.settled()
@@ -65,9 +68,9 @@ async def test_a_key_outside_the_provision_cannot_be_provided(runtime: Runtime, 
 
 async def test_a_key_cannot_be_provided_twice(runtime: Runtime) -> None:
     # set(k, v) requires k ∉ dom(σ); the violation raises and no transition happens.
-    def apply(ctx: Context) -> None:
-        ctx.provide(NUMBER, 1)
-        ctx.provide(NUMBER, 2)
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.provide(NUMBER, 1)
+        yield ctx.provide(NUMBER, 2)
 
     fiber = runtime.root.use(Component("twice", apply=apply, provides=(NUMBER,)))
     await runtime.settled()
@@ -95,7 +98,7 @@ async def test_an_effect_on_a_fiber_that_is_not_running_is_refused(runtime: Runt
     fiber = runtime.root.use(Component("waiting", requires=(NUMBER,)))
     await runtime.settled()
     with pytest.raises(InactiveEffect, match="waiting is inactive"):
-        fiber.ctx.effect(lambda: None)
+        fiber.ctx.adopt(lambda: None)
 
 async def test_keys_with_the_same_name_are_different_keys(runtime: Runtime) -> None:
     namesake: Key[int] = Key("number")

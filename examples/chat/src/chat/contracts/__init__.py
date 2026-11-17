@@ -3,11 +3,11 @@ from .conversation import MODEL, AssistantMessage, Item, Model, Note, ToolCall, 
 from .offers import AGENT_TYPES, PROVIDERS, AgentProfile, Provider
 from .session import (
     CONNECTION,
-    SESSION_CLOSED,
     SESSION_KEYS,
-    SESSION_OPENED,
+    SESSION_LOG,
     Connection,
     SessionClosed,
+    SessionLog,
     SessionOpened,
     SessionRequest,
 )
@@ -25,9 +25,9 @@ from .tools import (
 )
 
 __all__ = [
-    "AGENT_TYPES", "CONNECTION", "INJECT", "MODEL", "PROVIDERS", "SESSION_CLOSED", "SESSION_KEYS", "SESSION_OPENED",
+    "AGENT_TYPES", "CONNECTION", "INJECT", "MODEL", "PROVIDERS", "SESSION_KEYS", "SESSION_LOG",
     "SESSION_STATE", "TOOLS", "WORKSPACE",
     "AgentProfile", "AssistantMessage", "Catalog", "Connection", "Item", "Model", "Note", "Provider", "ReadState",
-    "SessionClosed", "SessionOpened", "SessionRequest", "SessionState", "StateKey", "Tool", "ToolCall", "ToolResult",
+    "SessionClosed", "SessionLog", "SessionOpened", "SessionRequest", "SessionState", "StateKey", "Tool", "ToolCall", "ToolResult",
     "ToolSpec", "Turn", "UserMessage", "Workspace", "WriteState",
 ]

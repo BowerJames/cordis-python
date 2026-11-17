@@ -1,4 +1,4 @@
-from .application import APPLICATION, Application, Serve, Work, serve
+from .application import APPLICATION, Application
 from .cli import ARGS, CLI, Argument, Arguments, ReadArgument, UsageError, option, positional, repeated, switch
 from .events import EVENTS, EventHandler, Events, Publish, Subscribe, Topic
 from .get_env import GET_ENV, GetEnv
@@ -33,6 +33,7 @@ from .sql import SQL, ConstraintViolation, Execute, Fetch, Parameters, Row, Sql,
 from .sqlite import SQLITE, SqliteDatabase, SqliteRun
 from .stdio import STDERR, STDERR_IS_TERMINAL, STDOUT, STDOUT_IS_TERMINAL, IsTerminal, Write
 from .timer import TIMER, Timer
+from .work import Work, background
 
 __all__ = [
     "APPLICATION", "ARGS", "CLI", "EVENTS", "GET_ENV", "HTTP", "OPENAI_CLIENTS", "POSTGRES",
@@ -41,8 +42,8 @@ __all__ = [
     "Application", "Argument", "Arguments", "ConstraintViolation", "EventHandler", "Events", "Execute", "Fetch",
     "GetEnv", "HTTPClient", "HTTPConnectionError", "HTTPError", "HTTPTimeout", "Handler", "Headers", "IsTerminal",
     "Matched", "NotAllowed", "Observer", "OpenAIClients", "Parameters", "PostgresPool", "Publish", "ReadArgument",
-    "Request", "Response", "Route", "RouteTable", "Row", "Serve", "ServerRequest", "ServerResponse", "Socket",
+    "Request", "Response", "Route", "RouteTable", "Row", "ServerRequest", "ServerResponse", "Socket",
     "SocketHandler", "SocketRoute", "Sql", "SqlError", "SqliteDatabase", "SqliteRun", "Subscribe", "Timer", "Topic",
     "UsageError", "Work", "Write",
-    "option", "positional", "repeated", "serve", "switch",
+    "background", "option", "positional", "repeated", "switch",
 ]

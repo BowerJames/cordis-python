@@ -14,8 +14,8 @@ from textual.widgets import Button, Footer, Header, Input, Markdown, Select, Sta
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from cordis import Component, Context
-from cordis_plugins import APPLICATION, SERVER_ADDRESS, serve
+from cordis import Component, Context, Inverse
+from cordis_plugins import APPLICATION, SERVER_ADDRESS, background
 
 from ..contracts import AGENT_TYPES, PROVIDERS
 
@@ -177,8 +177,11 @@ def tui(path: str = "/ws/chat", provider: str | None = None, model_name: str = "
     # A terminal client for the chat route, run once the application has started, offering the providers and agent
     # types the server has. It talks to the server over a websocket like any other client; quitting it ends the
     # application. It requires the server's address, so it closes before the server stops.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         async def run(stopping: asyncio.Event) -> None:
+            # Opened once everything has loaded, so every provider and agent type is on offer.
+            if not await ctx.get(APPLICATION).started():
+                return
             address = ctx.get(SERVER_ADDRESS).replace("http://", "ws://", 1)
             app = ChatApp(f"{address}{path}", providers=ctx.get(PROVIDERS).names(), agent_types=ctx.get(AGENT_TYPES).names(),
                           provider=provider, model_name=model_name, agent_type=agent_type)
@@ -195,6 +198,6 @@ def tui(path: str = "/ws/chat", provider: str | None = None, model_name: str = "
             await running
             ctx.get(APPLICATION).end(0)
 
-        serve(ctx, "terminal client", run)
+        return background(ctx, "terminal client", run)
 
     return Component("tui", apply=apply, requires=(APPLICATION, SERVER_ADDRESS, PROVIDERS, AGENT_TYPES))

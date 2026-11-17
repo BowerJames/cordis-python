@@ -14,8 +14,8 @@ def state(fiber: Fiber | None) -> FiberState | None:
     return None if fiber is None else fiber.state
 
 def storage(path: str = "app.db") -> Component:
-    def apply(ctx: Context) -> None:
-        ctx.provide(STORAGE, path)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(STORAGE, path)
     return Component("storage", apply=apply, provides=(STORAGE,))
 
 class Log:
@@ -129,11 +129,11 @@ async def test_interception_is_updated_in_place_without_a_reload(runtime: Runtim
     loads: list[str] = []
     readers: list[Context] = []
 
-    def files(ctx: Context) -> None:
+    def files(ctx: Context) -> Inverse:
         def serve(metadata: Metadata) -> str:
             served.append(metadata)
             return "read-only" if metadata.get("readonly") else "read-write"
-        ctx.provide_by(FILES, serve)
+        return ctx.provide_by(FILES, serve)
 
     def reader() -> Component:
         def apply(ctx: Context) -> None:

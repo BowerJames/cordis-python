@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterator, Mapping
 
-from cordis import Component, Context, Key
+from cordis import Component, Context, Inverse, Key
 from cordis_plugins import GET_ENV
 
 from ..contracts import INJECT, SESSION_STATE, TOOLS, WORKSPACE, StateKey, Tool, ToolSpec, Workspace
@@ -16,7 +16,7 @@ def workspace(root: Path | None = None) -> Component:
     # The directory every tool works in: the one given, else WORKSPACE_ROOT, else the current directory. The tools are
     # kept from whatever git ignores there, whether or not it is a repository, so what is kept out of version control,
     # such as a .env of keys, is never shown to a model.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         configured = ctx.get(GET_ENV)(WORKSPACE_VARIABLE)
         chosen = (root or Path(configured or ".")).resolve()
         if not chosen.is_dir():
@@ -24,7 +24,7 @@ def workspace(root: Path | None = None) -> Component:
         hidden = hidden_by_git(chosen)
         if hidden(chosen):
             raise PermissionError(f"the workspace {chosen} is ignored by its repository, so its tools would see nothing")
-        ctx.provide(WORKSPACE, Workspace(root=chosen, hidden=hidden))
+        return ctx.provide(WORKSPACE, Workspace(root=chosen, hidden=hidden))
     return Component("workspace", apply=apply, requires=(GET_ENV,), provides=(WORKSPACE,))
 
 def _inside(workspace: Workspace, given: str) -> Path:
@@ -58,9 +58,8 @@ type Run = Callable[[Mapping[str, Any]], Awaitable[str]]
 def _tool(name: str, spec: ToolSpec, make: Callable[[Context], Run], requires: tuple[Key[Any], ...] = ()) -> Component:
     # A component offering one tool in the session it is loaded in. Offering it is its effect, so the tool is there
     # exactly while the component is; it uses what it requires when it runs.
-    def apply(ctx: Context) -> None:
-        tool = Tool(spec=spec, run=make(ctx))
-        ctx.effect(lambda: ctx.get(TOOLS).offer(tool), f"offer {spec.name}")
+    def apply(ctx: Context) -> Inverse:
+        return ctx.get(TOOLS).offer(Tool(spec=spec, run=make(ctx)))
     return Component(name, apply=apply, requires=(TOOLS, WORKSPACE, *requires))
 
 # What read remembers in the session: each file it has shown, with when it was last changed.

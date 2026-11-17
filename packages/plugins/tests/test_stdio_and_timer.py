@@ -1,9 +1,9 @@
 import asyncio
-from typing import Callable
+from typing import Callable, Iterator
 
 import pytest
 
-from cordis import Component, Context, Runtime
+from cordis import Component, Context, Inverse, Runtime
 from cordis_plugins import (
     GET_ENV,
     STDERR,
@@ -58,9 +58,9 @@ async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(
 ) -> None:
     fired: list[str] = []
 
-    def apply(ctx: Context) -> None:
-        ctx.effect(lambda: ctx.get(TIMER).after(0.01, lambda: fired.append("late")))
-        ctx.effect(lambda: ctx.get(TIMER).after(0, lambda: fired.append("soon")))
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.get(TIMER).after(0.01, lambda: fired.append("late"))
+        yield ctx.get(TIMER).after(0, lambda: fired.append("soon"))
 
     runtime.root.use(keeper())
     fiber = runtime.root.use(Component("waiter", apply=apply, requires=(TIMER,)))

@@ -1,12 +1,12 @@
 from typing import TYPE_CHECKING, Any, Callable, Collection, Mapping, TypeVar, cast
 
 from .component import Apply, Component
-from .effect import Activation, Inverse
+from .effect import Inverse, Undo
 from .errors import InactiveAccess, ProvisionError, UndeclaredAccess
 from .key import Key, Metadata, Realm, RealmId
 
 if TYPE_CHECKING:
-    from .runtime import Effect, Fiber, Runtime
+    from .runtime import Fiber, Runtime
 
 T = TypeVar("T")
 
@@ -79,21 +79,33 @@ class Context:
 
     # --- effects -------------------------------------------------------------------------------------------------
 
-    def effect(self, callback: Callable[[], Activation], label: str = "effect") -> "Effect":
-        # Performs a revertible effect owned by this context's fiber: callback returns its inverse, or yields one
-        # per step, and the fiber's unloading applies them last in first out.
-        return self.runtime.effect(self.fiber, callback, label)
+    # Whatever a context does for a component, it gives the inverse back and holds nothing: the component yields each
+    # inverse from its effect function, so its accumulator holds them in the order the function says, and every yield
+    # is a seam the activation can stop at. Every Undo made during a step is owed by the fiber, whatever made it, and
+    # one still unyielded at the next seam fails the activation.
 
-    def provide(self, key: Key[T], value: T) -> "Effect":
-        # set(k, v) of Definition 20, an effect whose inverse withdraws the binding.
+    def adopt(self, inverse: Inverse, label: str = "an effect") -> Undo:
+        # Takes an inverse onto this fiber's accumulator at once, where there is nothing to yield it to: an effect
+        # performed once the fiber is active, or by an orchestrator working beneath this context. Applying the undo
+        # it gives back reverts that one effect early.
+        return self.runtime.adopt(self.fiber, inverse, label)
+
+    def fail(self, error: Exception) -> None:
+        # Reports that something this fiber started has failed, after the step that started it: work it runs in the
+        # background, say. The fiber takes the route a raising iteration takes (Section 4.4): it stops providing,
+        # unloads, and rests failed with the error, not retried until revised. A fiber already leaving only reports it.
+        self.runtime.fail(self.fiber, error)
+
+    def provide(self, key: Key[T], value: T) -> Undo:
+        # set(k, v) of Definition 20: binds value at key, and returns the inverse that withdraws the binding.
         return self._provide(key, value, None)
 
-    def provide_by(self, key: Key[T], factory: Callable[[Metadata], T]) -> "Effect":
+    def provide_by(self, key: Key[T], factory: Callable[[Metadata], T]) -> Undo:
         # Provides a function of interception metadata (Definition 26): each access is served by factory applied to
         # the metadata the accessing component declared, overridden by what its enclosing contexts carry.
         return self._provide(key, None, factory)
 
-    def _provide(self, key: Key[Any], value: object, factory: Callable[[Metadata], object] | None) -> "Effect":
+    def _provide(self, key: Key[Any], value: object, factory: Callable[[Metadata], object] | None) -> Undo:
         from .runtime import Binding
         owner = self.fiber
         if key not in owner.component.provides:
@@ -102,27 +114,27 @@ class Context:
         if realm in owner.table:
             raise ProvisionError(f"{owner.name} already provides {key.name}; a key cannot be provided twice")
         runtime = self.runtime
+        runtime.check_effectful(owner)
 
-        def install() -> Inverse:
-            owner.table[realm] = Binding(value, factory)
+        def withdraw() -> None:
+            owner.table.pop(realm, None)
             runtime.notify(realm)
 
-            def withdraw() -> None:
-                owner.table.pop(realm, None)
-                runtime.notify(realm)
-
-            return withdraw
-
-        return self.effect(install, f"provide {key.name}")
+        owner.table[realm] = Binding(value, factory)
+        undo = Undo(withdraw, f"provide {key.name}")
+        # Owed by the step that made it, or else by this fiber: the kernel knows whose binding this is.
+        owner.owe(undo)
+        runtime.notify(realm)
+        return undo
 
     def use(self, component: Component) -> "Fiber":
-        # Instantiates component beneath this context's fiber (Definition 52). The instantiation is one of this
-        # fiber's effects, so unloading this fiber retires the child.
+        # Instantiates component beneath this context's fiber (Definition 52). The child's O-Retire is the inverse
+        # of the instantiation, and it is the fiber's retire: yield it, and unloading this fiber retires the child.
         return self.runtime.instantiate(self, component)
 
     def inject(self, keys: Collection[Key[Any]], apply: Apply, name: str | None = None) -> "Fiber":
         # A child that requires keys and runs apply while they are provided: an optional dependency as a sub-fiber,
-        # adding behaviour while the keys exist and withdrawing it when they leave.
+        # adding behaviour while the keys exist and withdrawing it when they leave. Yield its retire, as for use.
         return self.use(Component(name or f"{self.fiber.name}/inject", apply=apply, requires=tuple(keys)))
 
     # --- derived contexts ----------------------------------------------------------------------------------------

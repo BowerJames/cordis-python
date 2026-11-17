@@ -1,4 +1,4 @@
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_plugins import EVENTS
 
 from ..contracts import CHANNEL, MESSAGES, Channel, Message
@@ -18,7 +18,7 @@ class _Transcript:
 
 def transcript_channel(lines: list[str]) -> Component:
     # A channel that writes everything said into lines, in place of a real chat platform.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         transcript = _Transcript(ctx, lines)
-        ctx.provide(CHANNEL, Channel(receive=transcript.receive, say=transcript.say))
+        return ctx.provide(CHANNEL, Channel(receive=transcript.receive, say=transcript.say))
     return Component("transcript channel", apply=apply, requires=(EVENTS,), provides=(CHANNEL,))

@@ -3,11 +3,11 @@ import itertools
 import logging
 from contextlib import asynccontextmanager
 from enum import Enum
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, Generator, Mapping
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, Mapping
 
 from .component import Component
-from .effect import Accumulator, Activation, Inverse, execute, execute_now, needs_awaiting
-from .errors import InactiveEffect, InsertionError
+from .effect import Accumulator, Inverse, Undo, execute, stepping, unowned
+from .errors import InactiveEffect, InsertionError, UnyieldedInverse
 from .key import Key, Metadata, RealmId
 
 if TYPE_CHECKING:
@@ -47,65 +47,22 @@ class Binding:
     def resolve(self, metadata: Metadata) -> object:
         return self.value if self.factory is None else self.factory(metadata)
 
-class Effect:
-    # One tracked effect (Algorithm 1): its inverses accumulate here, and its own disposal, composed onto the owning
-    # fiber's accumulator, reverts them all. Disposal happens at most once, and halts an iteration still under way.
-    __slots__ = ("_inverse", "accumulator", "armed", "error", "label", "owner", "task")
-
-    def __init__(self, owner: "Fiber", label: str) -> None:
-        self.owner = owner
-        self.label = label
-        self.armed = True
-        self.error: Exception | None = None
-        self.accumulator = Accumulator()
-        self.task: asyncio.Task[None] | None = None
-        # Kept as one object, so the owner can discard exactly it when the effect is disposed early.
-        self._inverse: Inverse = self.dispose
-
-    async def dispose(self) -> None:
-        if not self.armed:
-            return
-        self.armed = False
-        self.owner.accumulator.discard(self._inverse)
-        if self.task is not None and self.task is not asyncio.current_task():
-            await asyncio.wait([self.task])
-        for error in await self.accumulator.recover():
-            self.owner.runtime.report(self.owner, error)
-
-    def __await__(self) -> Generator[Any, None, "Effect"]:
-        # Waits for every iteration of the effect to land, raising what one of them raised.
-        if self.task is not None:
-            yield from asyncio.wait([self.task]).__await__()
-        if self.error is not None:
-            raise self.error
-        return self
-
-    async def _run(self, activation: Activation) -> None:
-        try:
-            await execute(activation, self.accumulator, lambda: self.armed)
-        except Exception as error:  # noqa: BLE001 - any failure is reported; cancellation is a BaseException and passes
-            self.error = error
-            self.owner.runtime.report(self.owner, error)
-            if self.owner.state is FiberState.LOADING and self.owner.error is None:
-                self.owner.error = error
-            await self.dispose()
-
 class Fiber:
     # One instantiation of a component: ⟨d, p, e, π, σ, τ, θ⟩ of Definition 49. Its uid is drawn fresh and never
     # reused, so a fiber that replaces another is never mistaken for it, even when both provide equal values.
     __slots__ = (
-        "_retire",
         "accumulator",
         "committed",
         "component",
         "ctx",
         "error",
         "inertia",
+        "issued",
         "origin",
         "parent",
-        "pending",
         "realms",
         "removed",
+        "retire",
         "retired",
         "runtime",
         "state",
@@ -139,12 +96,16 @@ class Fiber:
         # ω: the provider each declared key resolved to when the current activation began.
         self.committed: View | None = None
         self.accumulator = Accumulator()
+        # The inverses made during this fiber's steps that it has neither yielded nor adopted yet, in the order they
+        # were made. The fiber answers for them all the same: none is ever lost, only reported.
+        self.issued: dict[Undo, None] = {}
         # The transition in flight, if any: once begun it runs to completion before the fiber responds again.
         self.inertia: asyncio.Task[None] | None = None
-        # Effects whose iterations are still landing; an activation waits for them before the fiber is active.
-        self.pending: set[asyncio.Task[None]] = set()
         self.removed = False
-        self._retire: Inverse | None = None
+        # O-Retire, a request carried out by the lifecycle rules, and the inverse of the instantiation that made
+        # this fiber (Definition 52): whoever instantiated it yields this, or adopts it.
+        # Made during the step that instantiates it, so that step's fiber owes it.
+        self.retire: Undo = Undo(lambda: runtime.retire(self), f"use {component.name}")
 
     @property
     def name(self) -> str:
@@ -154,15 +115,24 @@ class Fiber:
     def requirement_realms(self) -> frozenset[RealmId]:
         return frozenset(self.realms[key] for key in self.component.requires)
 
-    def retire(self) -> None:
-        # O-Retire: a request, carried out by the lifecycle rules. Retiring a fiber from outside its parent's
-        # accumulator discards the parent's inverse for it, so it is never applied a second time.
-        if self.parent is not None and self._retire is not None:
-            self.parent.accumulator.discard(self._retire)
-        self.runtime.retire(self)
+    def outstanding(self) -> list[Undo]:
+        return [undo for undo in self.issued if undo.outstanding]
+
+    def owe(self, undo: Undo) -> None:
+        # An Undo made during one of this fiber's steps, or by the kernel for this fiber outside any step: the fiber
+        # answers for it until it is held or applied. One already owed stays with whoever owes it.
+        if undo._settled is not None or undo.applied or undo.holder is not None:
+            return
+        self.issued[undo] = None
+        undo._settled = self.settle
+
+    def settle(self, undo: Undo) -> None:
+        # An inverse this fiber owed has landed on an accumulator, or been applied: it is owed no longer.
+        self.issued.pop(undo, None)
 
     async def dispose(self) -> None:
-        # Retires the fiber and waits until it, and everything it instantiated, has left the registry.
+        # Retires the fiber and waits until it, and everything it instantiated, has left the registry. Retiring it
+        # here takes its retire off whatever accumulator holds it, so it is never applied a second time.
         self.retire()
         await self.runtime.wait_for(lambda: self.removed)
 
@@ -171,7 +141,11 @@ class Fiber:
         # where this fiber stood, with a new component or the same one. It is how a failed fiber is retried, and the
         # new fiber is a new identity, so its dependents reactivate against it.
         await self.dispose()
-        return self.origin.use(component if component is not None else self.component)
+        revised = self.origin.use(component if component is not None else self.component)
+        # A revision is the orchestrator's doing, with no effect function to yield from: the fiber it stands under
+        # holds its retire from here.
+        self.origin.adopt(revised.retire)
+        return revised
 
     def __repr__(self) -> str:
         return f"Fiber({self.name!r}, uid={self.uid}, {self.state.value})"
@@ -189,6 +163,7 @@ class Runtime:
         self._changed = asyncio.Event()
         self._on_error = on_error
         self.root_fiber = Fiber(self, 0, Component("root"), None, {})
+        self.root_fiber.retire.applied = True  # the root is never retired
         self.root_fiber.state = FiberState.ACTIVE
         self.root_fiber.committed = {}
         self.root: Context = Context(self, self.root_fiber, {}, ())
@@ -298,12 +273,12 @@ class Runtime:
         parent = ctx.fiber
         self.check_effectful(parent)
         fiber = self.insert(component, ctx)
-
-        def retire() -> None:
-            self.retire(fiber)
-
-        fiber._retire = retire
-        parent.accumulator.push(retire)
+        if parent is self.root_fiber:
+            # The root is the orchestrator: it has no effect function to yield from, so it holds what it makes.
+            parent.accumulator.push(fiber.retire)
+        else:
+            # Owed by the step that made it, or else by the parent: the kernel knows whose instantiation this is.
+            parent.owe(fiber.retire)
         self.refresh(fiber)
         return fiber
 
@@ -335,27 +310,9 @@ class Runtime:
         if fiber.state not in (FiberState.LOADING, FiberState.ACTIVE) or fiber.removed:
             raise InactiveEffect(f"{fiber.name} is {fiber.state.value}, so an effect on it would never be reverted")
 
-    def effect(self, owner: Fiber, callback: Callable[[], Activation], label: str) -> Effect:
-        # ctx.effect: runs callback as an effect iterator and composes its disposal onto the owner's accumulator, so a
-        # child effect's inverse is itself an effect on the owner (the recursive structure of ∂²Γ).
-        self.check_effectful(owner)
-        effect = Effect(owner, label)
-        owner.accumulator.push(effect._inverse)
-        try:
-            activation = callback()
-            if needs_awaiting(activation):
-                effect.task = self._spawn(effect._run(activation))
-                owner.pending.add(effect.task)
-                effect.task.add_done_callback(owner.pending.discard)
-            else:
-                execute_now(activation, effect.accumulator, lambda: effect.armed)
-        except Exception:
-            # What ran before the failure is reverted at once; the failure itself installed nothing.
-            effect.armed = False
-            owner.accumulator.discard(effect._inverse)
-            self._spawn(self._recover(owner, effect.accumulator))
-            raise
-        return effect
+    def adopt(self, fiber: Fiber, inverse: Inverse, label: str = "an effect") -> Undo:
+        self.check_effectful(fiber)
+        return fiber.accumulator.push(inverse, label)
 
     async def _recover(self, owner: Fiber, accumulator: Accumulator) -> None:
         for error in await accumulator.recover():
@@ -363,6 +320,22 @@ class Runtime:
 
     def report(self, fiber: Fiber, error: Exception) -> None:
         self._on_error(fiber, error)
+
+    def fail(self, fiber: Fiber, error: Exception) -> None:
+        # Section 4.4's failure, read at a fiber that is activating or active rather than at a raising iteration: an
+        # activation stops at its next seam, and an active fiber leaves (L-Leave) as one whose target has turned does.
+        # Either way it unloads by the route every deactivation takes, and rests failed.
+        self.report(fiber, error)
+        if fiber.removed or fiber.error is not None:
+            return
+        if fiber.state is FiberState.LOADING:
+            fiber.error = error
+            self._signal()
+        elif fiber.state is FiberState.ACTIVE:
+            fiber.error = error
+            self._leave(fiber)
+            if fiber.inertia is None:
+                fiber.inertia = self._spawn(self._drive(fiber))
 
     # --- reactive notification and the lifecycle rules -----------------------------------------------------------
 
@@ -443,12 +416,24 @@ class Runtime:
         def unchanged() -> bool:
             return self.target(fiber) == committed
 
+        def proceeding() -> bool:
+            # The guard read at every seam: the resolution still holds, and nothing the fiber started has failed.
+            return fiber.error is None and unchanged()
+
+        def yielded() -> None:
+            # At every seam the accumulator holds the inverse of everything done so far, which is what lets the
+            # activation stop there and recover exactly the steps taken.
+            owed = fiber.outstanding()
+            if owed:
+                raise UnyieldedInverse(f"{fiber.name} did not yield the inverse of "
+                                       f"{', '.join(undo.label for undo in owed)} before its next step")
+
         try:
             if fiber.component.apply is not None:
-                await execute(fiber.component.apply(fiber.ctx), fiber.accumulator, unchanged)
-            # Effects begun during activation land before the fiber counts as active, so it provides what they install.
-            while pending := {task for task in fiber.pending if not task.done()}:
-                await asyncio.wait(pending)
+                # Calling the effect function is a step of its own: a plain function does all its work here.
+                with stepping(fiber.owe):
+                    activation = fiber.component.apply(fiber.ctx)
+                await execute(activation, fiber.accumulator, proceeding, yielded, fiber.owe)
         except Exception as error:  # noqa: BLE001 - any failure is reported; cancellation is a BaseException and passes
             fiber.error = error
             self.report(fiber, error)
@@ -458,6 +443,15 @@ class Runtime:
         # L-Unload, behind its guard: the inverses run only once no installed fiber resolves a key to this one, so
         # every consumer has finished a teardown that may still have needed it.
         await self.wait_for(lambda: not self.relied(fiber))
+        # What the fiber still owes is reverted with the rest, newest first: an inverse left unyielded by a failed
+        # activation, which has said so already, or one never adopted while the fiber was active, which is said here.
+        owed = fiber.outstanding()
+        if owed and fiber.error is None:
+            self.report(fiber, UnyieldedInverse(f"{fiber.name} never yielded or adopted the inverse of "
+                                                f"{', '.join(undo.label for undo in owed)}"))
+        for undo in owed:
+            fiber.accumulator.push(undo)
+        fiber.issued.clear()
         for error in await fiber.accumulator.recover():
             self.report(fiber, error)
         fiber.committed = None
@@ -468,9 +462,10 @@ class Runtime:
 
     def _spawn(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         # Always started lazily, whatever task factory the loop has: the runtime records a task (a transition in
-        # flight, an effect pending) before any of it runs, as Algorithm 5 does. A task started eagerly could run to the
+        # flight) before any of it runs, as Algorithm 5 does. A task started eagerly could run to the
         # end inside this call, and leave a finished transition recorded as in flight, so the fiber could never leave.
-        task = asyncio.Task(coroutine, loop=asyncio.get_running_loop(), eager_start=False)
+        # Run outside whatever step started it, so nothing a transition makes is owed by the fiber that caused it.
+        task = asyncio.Task(coroutine, loop=asyncio.get_running_loop(), eager_start=False, context=unowned())
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
@@ -484,7 +479,7 @@ class Runtime:
             await self._changed.wait()
 
     async def settled(self, under: Fiber | None = None) -> None:
-        # Waits until no transition or effect is in flight; with acyclic dependencies that is quiescence (Theorem 73).
+        # Waits until no transition is in flight; with acyclic dependencies that is quiescence (Theorem 73).
         # Given a fiber, waits only for it and what it instantiated, so an orchestrator of one subtree, such as a
         # session, is not held up by the rest of the system.
         if under is None:
@@ -497,8 +492,7 @@ class Runtime:
 
         while True:
             members = subtree(under)
-            pending = {task for fiber in members for task in (fiber.inertia, *fiber.pending)
-                       if task is not None and not task.done()}
+            pending = {fiber.inertia for fiber in members if fiber.inertia is not None and not fiber.inertia.done()}
             if not pending:
                 return
             await asyncio.wait(pending)

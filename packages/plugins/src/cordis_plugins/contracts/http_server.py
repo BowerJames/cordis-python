@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Mapping
 
-from cordis import Inverse, Key
+from cordis import Key, Undo
 
 from .http import Headers
 
@@ -14,8 +14,8 @@ from .http import Headers
 #   a route in the table is answered by its handler; an unknown path is 404; a known path with another method is 405,
 #   with an Allow header; a request it cannot read is 4xx; a body over max_body is 413; a handler that raises is 500
 #   for that request alone, and is reported on STDERR when there is one.
-#   The socket is bound while the server activates, and its address provided as SERVER_ADDRESS then; it serves from
-#   when the application has started. Unloaded, it stops accepting, lets requests in progress finish, and returns.
+#   The socket is bound and accepting while the server activates, and its address provided as SERVER_ADDRESS then.
+#   Unloaded, it stops accepting, lets requests in progress finish within a grace, and returns.
 #   It may add headers to a response, but never changes the status or body a handler returned.
 # Websockets are optional: a provider that serves them accepts a connection on a socket route in the table and hands it
 # to that route's handler, closing it once the handler returns; a handler that raises closes its connection with 1011
@@ -96,10 +96,12 @@ class NotAllowed:
 @dataclass(slots=True, frozen=True)
 class RouteTable:
     # The value bound at ROUTES. Adding a route is an entry of its own, withdrawn by the inverse add returns, so
-    # contributors come and go independently; two routes answering the same method and path are refused, as is a
+    # contributors come and go independently. Withdrawing takes the route out at once, so no new request reaches it,
+    # and then waits for the requests it is still answering, so a contributor finishes what it took on while still
+    # loaded; two routes answering the same method and path are refused, as is a
     # path not starting with /, by add raising ValueError, which fails the contributor that tried.
-    add: Callable[[Route], Inverse]
-    add_socket: Callable[[SocketRoute], Inverse]
+    add: Callable[[Route], Undo]
+    add_socket: Callable[[SocketRoute], Undo]
     # Every route in the table now, in the order they were added.
     routes: Callable[[], tuple[Route, ...]]
     sockets: Callable[[], tuple[SocketRoute, ...]]

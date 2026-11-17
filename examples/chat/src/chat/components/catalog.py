@@ -1,6 +1,6 @@
 from typing import Callable
 
-from cordis import Entries, Inverse
+from cordis import Entries, Undo
 
 from ..contracts import Catalog
 
@@ -13,10 +13,10 @@ class _Offered[T]:
         self._name = name
         self._entries: Entries[T] = Entries()
 
-    def offer(self, item: T) -> Inverse:
+    def offer(self, item: T) -> Undo:
         if self._name(item) in self.names():
             raise ValueError(f"{self._name(item)} is already on offer")
-        return self._entries.add(item)
+        return self._entries.add(item, f"offer {self._name(item)}")
 
     def names(self) -> tuple[str, ...]:
         return tuple(self._name(item) for item in self._entries)

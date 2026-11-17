@@ -1,7 +1,7 @@
 import asyncio
-from typing import Any
+from typing import Iterator
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_plugins import (
     APPLICATION,
     ARGS,
@@ -10,14 +10,13 @@ from cordis_plugins import (
     STDERR,
     STDOUT,
     STDOUT_IS_TERMINAL,
-    Argument,
     HTTPError,
     Request,
     Response,
+    background,
     option,
     positional,
     repeated,
-    serve,
     switch,
 )
 
@@ -47,14 +46,10 @@ DATA = option("data", ("-d", "--data"), "data to send as the request body", str)
 INCLUDE = switch("include", ("-i", "--include"), "include the status line and headers in the output")
 MAX_TIME = option("max_time", ("-m", "--max-time"), "the most seconds to wait for the whole request", seconds)
 
-def register(ctx: Context, argument: Argument[Any]) -> None:
-    # Registering an argument is an effect of the component registering it, withdrawn as it unloads.
-    ctx.effect(lambda: ctx.get(CLI).add(argument), f"argument {argument.name}")
-
 def curl() -> Component:
     # Registers its arguments as it loads; the fetch is a child that requires the parsed arguments, so it activates
     # once the command line has been parsed, and makes the one request the application exists for.
-    def fetch(ctx: Context) -> None:
+    def fetch(ctx: Context) -> Inverse:
         async def work(stopping: asyncio.Event) -> None:
             args = ctx.get(ARGS)
             data = args(DATA)
@@ -84,13 +79,16 @@ def curl() -> Component:
             # At a terminal, the prompt should start on a line of its own; piped or redirected, the body stays exact.
             if body and not body.endswith("\n") and ctx.get(STDOUT_IS_TERMINAL)():
                 write("\n")
+            # The one request is what the application exists for, so it is over once that is printed.
+            ctx.get(APPLICATION).end(0)
 
-        serve(ctx, "fetch", work, after_start=False)
+        return background(ctx, "fetch", work)
 
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        # Each argument is registered for as long as curl is loaded: registering gives back the inverse it yields.
         for argument in (URL, METHOD, HEADERS, DATA, INCLUDE, MAX_TIME):
-            register(ctx, argument)
-        ctx.inject([APPLICATION, ARGS, HTTP, STDOUT, STDOUT_IS_TERMINAL], fetch, name="fetch")
+            yield ctx.get(CLI).add(argument)
+        yield ctx.inject([APPLICATION, ARGS, HTTP, STDOUT, STDOUT_IS_TERMINAL], fetch, name="fetch").retire
 
     return Component("curl", apply=apply, requires=(CLI,))
 
@@ -100,7 +98,7 @@ def verbose() -> Component:
     # Shows every exchange the HTTP client makes, when -v is given, without whatever makes the requests knowing it is
     # there. It observes rather than wraps: observing is a registration of its own, so it needs no place in any order,
     # and it is withdrawn with the component.
-    def observe(ctx: Context) -> None:
+    def observe(ctx: Context) -> Iterator[Inverse]:
         if not ctx.get(ARGS)(VERBOSITY):
             return
         write = ctx.get(STDERR)
@@ -119,10 +117,10 @@ def verbose() -> Component:
                 write(f"< {name}: {value}\n")
             write("<\n")
 
-        ctx.effect(lambda: ctx.get(HTTP).observe(shown), "observe requests")
+        yield ctx.get(HTTP).observe(shown)
 
-    def apply(ctx: Context) -> None:
-        register(ctx, VERBOSITY)
-        ctx.inject([ARGS, HTTP, STDERR], observe, name="verbose output")
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.get(CLI).add(VERBOSITY)
+        yield ctx.inject([ARGS, HTTP, STDERR], observe, name="verbose output").retire
 
     return Component("verbose", apply=apply, requires=(CLI,))

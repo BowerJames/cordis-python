@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from email.message import Message
 from typing import Awaitable, Callable
 
-from cordis import Inverse, Key
+from cordis import Key, Undo
 
 # Every HTTP client keeps these promises: send makes one request and returns its response, whatever its status; a
 # request that produced no response raises HTTPError (HTTPTimeout, HTTPConnectionError), never the library's own
@@ -62,6 +62,6 @@ type Observer = Callable[[Request, Response | HTTPError], None]
 class HTTPClient:
     send: Callable[[Request], Awaitable[Response]]
     # Shows observer every exchange from now on, until the inverse is applied.
-    observe: Callable[[Observer], Inverse]
+    observe: Callable[[Observer], Undo]
 
 HTTP: Key[HTTPClient] = Key("http")

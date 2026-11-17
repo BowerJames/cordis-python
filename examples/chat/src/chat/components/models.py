@@ -51,7 +51,7 @@ def model() -> Component:
         held = AsyncExitStack()
         respond = await held.enter_async_context(provider.connect(request.model_name))
         yield held.aclose
-        ctx.provide(MODEL, respond)
+        yield ctx.provide(MODEL, respond)
 
     return Component("model", apply=apply, requires=(CONNECTION, PROVIDERS), provides=(MODEL,))
 
@@ -64,12 +64,11 @@ def _key(get_env: GetEnv, variable: str) -> str:
 def _offering(name: str, variable: str, provider: Callable[[Context], Provider]) -> Component:
     # Offers a provider to every session, and says as it loads when the provider has no key: the server still starts,
     # for the providers that do, and sessions asking for this one fail when they open.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         write = ctx.find(STDERR)
         if not ctx.get(GET_ENV)(variable) and write is not None:
             write(f"{variable} is not set, so sessions asking for {name} will fail\n")
-        offered = provider(ctx)
-        ctx.effect(lambda: ctx.get(PROVIDERS).offer(offered), f"offer {name}")
+        return ctx.get(PROVIDERS).offer(provider(ctx))
     return Component(name, apply=apply, requires=(PROVIDERS, OPENAI_CLIENTS, GET_ENV))
 
 class _Refused(Exception):

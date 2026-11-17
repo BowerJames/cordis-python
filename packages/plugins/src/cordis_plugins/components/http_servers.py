@@ -3,7 +3,7 @@ import contextlib
 import socket
 from contextlib import suppress
 from http import HTTPStatus
-from typing import AsyncIterator, Generator
+from typing import AsyncIterator, Awaitable, Callable, Generator, Iterator
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 import uvicorn
@@ -13,7 +13,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from cordis import Component, Context, Entries, Inverse
+from cordis import Component, Context, Entries, Inverse, Undo
 
 from ..contracts import (
     APPLICATION,
@@ -31,7 +31,7 @@ from ..contracts import (
     ServerResponse,
     Socket,
     SocketRoute,
-    serve,
+    background,
 )
 
 DEFAULT_HOST = "127.0.0.1"
@@ -41,27 +41,64 @@ HTTP_HOST_VARIABLE = "HTTP_HOST"
 HTTP_PORT_VARIABLE = "HTTP_PORT"
 MAX_HEADER_BYTES = 65_536
 
+class _InFlight:
+    # The calls of one route still being answered, so withdrawing the route can wait for them.
+    __slots__ = ("_count", "_idle")
+
+    def __init__(self) -> None:
+        self._count = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
+
+    def wrap[A, R](self, handle: Callable[[A], Awaitable[R]]) -> Callable[[A], Awaitable[R]]:
+        async def tracked(argument: A) -> R:
+            self._count += 1
+            self._idle.clear()
+            try:
+                return await handle(argument)
+            finally:
+                self._count -= 1
+                if not self._count:
+                    self._idle.set()
+        return tracked
+
+    def withdraw(self, remove: Undo) -> Callable[[], Awaitable[None] | None]:
+        # Takes the route out of the table at once, so no new call reaches it, and then, if any call is still being
+        # answered, gives back what to await until the last has been: the contributor withdrawing it, still loaded,
+        # finishes the calls it took on before anything else of it is undone (Section 4.4, an inverse in flight).
+        def withdrawn() -> Awaitable[None] | None:
+            remove()
+            return None if self._idle.is_set() else self._drained()
+        return withdrawn
+
+    async def _drained(self) -> None:
+        await self._idle.wait()
+
 class _Routes:
-    # Every route and socket route an entry of its own.
+    # Every route and socket route an entry of its own, each answered through a wrapper counting its calls in flight.
     __slots__ = ("_routes", "_sockets")
 
     def __init__(self) -> None:
         self._routes: Entries[Route] = Entries()
         self._sockets: Entries[SocketRoute] = Entries()
 
-    def add(self, route: Route) -> Inverse:
+    def add(self, route: Route) -> Undo:
         if not route.path.startswith("/"):
             raise ValueError(f"route {route} must start with /")
         if any((other.method.upper(), other.path) == (route.method.upper(), route.path) for other in self._routes):
             raise ValueError(f"two routes answer {route}")
-        return self._routes.add(route)
+        calls = _InFlight()
+        remove = self._routes.add(Route(route.method, route.path, calls.wrap(route.handle)), f"route {route}")
+        return Undo(calls.withdraw(remove), f"route {route}", covers=(remove,))
 
-    def add_socket(self, route: SocketRoute) -> Inverse:
+    def add_socket(self, route: SocketRoute) -> Undo:
         if not route.path.startswith("/"):
             raise ValueError(f"socket route {route.path} must start with /")
         if any(other.path == route.path for other in self._sockets):
             raise ValueError(f"two socket routes answer {route.path}")
-        return self._sockets.add(route)
+        calls = _InFlight()
+        remove = self._sockets.add(SocketRoute(route.path, calls.wrap(route.handle)), f"socket route {route.path}")
+        return Undo(calls.withdraw(remove), f"socket route {route.path}", covers=(remove,))
 
     def routes(self) -> tuple[Route, ...]:
         return tuple(self._routes)
@@ -100,9 +137,9 @@ def _params(pattern: list[str], wanted: list[str]) -> dict[str, str] | None:
 
 def route_table() -> Component:
     # The routes, for contributors to add to and servers to answer from; neither requires the other.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         table = _Routes()
-        ctx.provide(ROUTES, RouteTable(add=table.add, add_socket=table.add_socket, routes=table.routes,
+        return ctx.provide(ROUTES, RouteTable(add=table.add, add_socket=table.add_socket, routes=table.routes,
                                        sockets=table.sockets, socket=table.socket, match=table.match))
     return Component("route table", apply=apply, provides=(ROUTES,))
 
@@ -111,17 +148,19 @@ async def _healthy(request: ServerRequest) -> ServerResponse:
 
 def health() -> Component:
     # GET /health answers ok for as long as this is loaded: the route is its one effect.
-    def apply(ctx: Context) -> None:
-        route = Route("GET", "/health", _healthy)
-        ctx.effect(lambda: ctx.get(ROUTES).add(route), f"route {route}")
+    def apply(ctx: Context) -> Inverse:
+        return ctx.get(ROUTES).add(Route("GET", "/health", _healthy))
     return Component("health", apply=apply, requires=(ROUTES,))
 
 def announce() -> Component:
     # Says where the server is once the application has started, and says when it is going away. It relies on the
     # server, through its address, so as the application ends it is told to stop before the server is: the farewell is
     # written while the server still serves, by the order ending follows, not by anything this component arranges.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         async def announcing(stopping: asyncio.Event) -> None:
+            # Said once everything has loaded, so every route is listed: an emission, which may wait for the start.
+            if not await ctx.get(APPLICATION).started():
+                return
             write = ctx.get(STDOUT)
             write(f"listening on {ctx.get(SERVER_ADDRESS)}\n")
             for route in sorted(ctx.get(ROUTES).routes(), key=lambda route: (route.path, route.method)):
@@ -129,7 +168,7 @@ def announce() -> Component:
             await stopping.wait()
             write("shutting down\n")
 
-        serve(ctx, "announce", announcing)
+        return background(ctx, "announce", announcing)
 
     return Component("announce", apply=apply, requires=(APPLICATION, SERVER_ADDRESS, ROUTES, STDOUT))
 
@@ -237,7 +276,10 @@ async def _read(reader: asyncio.StreamReader, max_body: int) -> ServerRequest | 
     return ServerRequest(method=method.upper(), path=unquote(split.path) or "/",
                          query=tuple(parse_qsl(split.query, keep_blank_values=True)), headers=tuple(headers), body=body)
 
-def asyncio_http_server(host: str | None = None, port: int | None = None, max_body: int = DEFAULT_MAX_BODY) -> Component:
+def asyncio_http_server(host: str | None = None, port: int | None = None, max_body: int = DEFAULT_MAX_BODY,
+                        grace: float = 5.0) -> Component:
+    # The gateway form: binding and accepting is one step, and its inverse stops accepting, lets the requests in
+    # progress finish for up to grace seconds, cancels what is left, and closes. Nothing runs beside it.
     async def apply(ctx: Context) -> AsyncIterator[Inverse]:
         table = ctx.get(ROUTES)
         chosen_host, chosen_port = listen_on(host, port, ctx.get(GET_ENV))
@@ -260,33 +302,24 @@ def asyncio_http_server(host: str | None = None, port: int | None = None, max_bo
                     await writer.wait_closed()
                 in_progress.discard(task)
 
-        # Bound and listening now, so the address is known as the server activates, and early connections wait in the
-        # operating system's queue until the server starts accepting them, once the application has started.
-        listening = _listening(chosen_host, chosen_port)
-        server = await asyncio.start_server(connection, sock=listening, start_serving=False, limit=MAX_HEADER_BYTES)
+        server = await asyncio.start_server(connection, sock=_listening(chosen_host, chosen_port),
+                                            limit=MAX_HEADER_BYTES)
 
         async def close() -> None:
             server.close()
-            for task in in_progress:
-                task.cancel()
+            if in_progress:
+                _, late = await asyncio.wait(set(in_progress), timeout=grace)
+                for task in late:
+                    task.cancel()
+                if late:
+                    await asyncio.wait(late)
             await server.wait_closed()
 
         yield close
         bound_host, bound_port = server.sockets[0].getsockname()[:2]
-        ctx.provide(SERVER_ADDRESS, address_of(bound_host, bound_port))
+        yield ctx.provide(SERVER_ADDRESS, address_of(bound_host, bound_port))
 
-        async def serving(stopping: asyncio.Event) -> None:
-            await server.start_serving()
-            await stopping.wait()
-            # Told to stop: stop accepting, then let requests in progress finish (the application's grace bounds this).
-            server.close()
-            while in_progress:
-                await asyncio.wait(set(in_progress))
-
-        serve(ctx, "http server", serving)
-
-    return Component("asyncio http server", apply=apply, requires=(APPLICATION, ROUTES, GET_ENV),
-                     provides=(SERVER_ADDRESS,))
+    return Component("asyncio http server", apply=apply, requires=(ROUTES, GET_ENV), provides=(SERVER_ADDRESS,))
 
 # --- FastAPI ------------------------------------------------------------------------------------------------------
 
@@ -384,16 +417,19 @@ def _app(table: RouteTable, max_body: int, ctx: Context) -> FastAPI:
     app.add_api_websocket_route("/{path:path}", socket_endpoint)
     return app
 
-def fastapi_http_server(host: str | None = None, port: int | None = None, max_body: int = DEFAULT_MAX_BODY) -> Component:
-    def apply(ctx: Context) -> None:
+def fastapi_http_server(host: str | None = None, port: int | None = None, max_body: int = DEFAULT_MAX_BODY,
+                        grace: float = 5.0) -> Component:
+    # The gateway form, with uvicorn run as background work of this fiber, since serving is a coroutine of its own:
+    # its inverse stops accepting, lets requests in progress finish for up to grace seconds, and then cancels.
+    def apply(ctx: Context) -> Iterator[Inverse]:
         chosen_host, chosen_port = listen_on(host, port, ctx.get(GET_ENV))
         # Bound and listening now, so the address is known as the server activates, and early connections wait in the
         # operating system's queue until uvicorn starts accepting them.
         listening = _listening(chosen_host, chosen_port)
         # Closed after serving has stopped: inverses run newest first, and serving is started after this.
-        ctx.effect(lambda: listening.close, "close the listening socket")
+        yield listening.close
         bound_host, bound_port = listening.getsockname()[:2]
-        ctx.provide(SERVER_ADDRESS, address_of(bound_host, bound_port))
+        yield ctx.provide(SERVER_ADDRESS, address_of(bound_host, bound_port))
         config = uvicorn.Config(_app(ctx.get(ROUTES), max_body, ctx), lifespan="off", log_config=None,
                                 log_level="critical", access_log=False, timeout_graceful_shutdown=None)
         server = _Server(config)
@@ -419,7 +455,7 @@ def fastapi_http_server(host: str | None = None, port: int | None = None, max_bo
                     with suppress(asyncio.CancelledError):
                         await running
 
-        serve(ctx, "http server", serving)
+        yield background(ctx, "http server", serving, grace=grace)
 
-    return Component("fastapi http server", apply=apply, requires=(APPLICATION, ROUTES, GET_ENV),
+    return Component("fastapi http server", apply=apply, requires=(ROUTES, GET_ENV),
                      provides=(SERVER_ADDRESS,))

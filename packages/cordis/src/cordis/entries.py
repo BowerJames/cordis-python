@@ -1,6 +1,6 @@
 from typing import Generic, Iterator, TypeVar
 
-from .effect import Inverse
+from .effect import Undo
 
 T = TypeVar("T")
 
@@ -13,14 +13,15 @@ class Entries(Generic[T]):
     def __init__(self) -> None:
         self._entries: dict[object, T] = {}
 
-    def add(self, value: T) -> Inverse:
+    def add(self, value: T, label: str = "an entry") -> Undo:
+        # The inverse is owed a place on an accumulator like any other: whoever adds yields it, or adopts it.
         ticket = object()
         self._entries[ticket] = value
 
         def remove() -> None:
             self._entries.pop(ticket, None)
 
-        return remove
+        return Undo(remove, label)
 
     def __iter__(self) -> Iterator[T]:
         # A snapshot, so an entry added or removed while iterating takes effect from the next iteration.

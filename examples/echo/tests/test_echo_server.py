@@ -89,7 +89,7 @@ Activation order (unloaded in reverse):
   2. stdio
   3. env
   4. routes
-  5. server      after application (application), routes (routes), env (get_env)
+  5. server      after routes (routes), env (get_env)
   6. health      after routes (routes)
   7. echo        after routes (routes)
   8. announce    after application (application), server (server_address), routes (routes), stdio (stdout)
@@ -105,7 +105,7 @@ Entries:
   announce     announce
 
 Keys:
-  application         provided by application; required by server, announce
+  application         provided by application; required by announce
   stdout              provided by stdio; required by announce
   stderr              provided by stdio
   stdout_is_terminal  provided by stdio

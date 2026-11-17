@@ -1,12 +1,12 @@
 import json
 import socket
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import urlsplit
 
 import pytest
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry, patched
 from cordis_plugins import (
     HTTP,
@@ -48,11 +48,11 @@ def probing_stdio(seen: dict[str, Any], captured: Captured) -> Callable[[], Comp
             seen["accepting"] = accepting(seen["address"])
         captured.stdout += text
 
-    def apply(ctx: Context) -> None:
-        ctx.provide(STDOUT, write)
-        ctx.provide(STDERR, lambda text: None)
-        ctx.provide(STDOUT_IS_TERMINAL, lambda: False)
-        ctx.provide(STDERR_IS_TERMINAL, lambda: False)
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.provide(STDOUT, write)
+        yield ctx.provide(STDERR, lambda text: None)
+        yield ctx.provide(STDOUT_IS_TERMINAL, lambda: False)
+        yield ctx.provide(STDERR_IS_TERMINAL, lambda: False)
     return lambda: Component("probing stdio", apply=apply, provides=(STDOUT, STDERR, STDOUT_IS_TERMINAL, STDERR_IS_TERMINAL))
 
 async def site(argv: list[str], steps: Steps | None = None, database: Path | None = None,

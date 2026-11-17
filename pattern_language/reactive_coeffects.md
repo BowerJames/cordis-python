@@ -22,4 +22,6 @@ Declare dependencies as keys (`requires`), and let a fiber activate only when ea
 
 Withdraw a capability in two moves. First the provider stops providing (L-Leave): its dependents' targets turn and they begin their own teardown while every binding it holds is still in place. Only when no installed fiber's committed view names it does it run its inverses (L-Unload, behind its guard). The guard cannot wait forever, since a fiber that has left can never be committed to again (Theorem 73).
 
-An optional dependency is a nested fiber: `ctx.inject([key], apply)` adds behaviour while the key is provided and withdraws it when the key leaves. A dependency cycle is never satisfied, and `describe()` reports it from the declarations alone; split one member so what it provides is separate from what it requires.
+Order follows declarations alone, so what has to be ordered has to be declared, in the direction of the order: a session that must tell a log it closed, even as the whole application ends, requires the log, and the log then stays until the session has told it; were both to meet on an event bus, they would be two dependents of the bus, which nothing orders, and the paper promises nothing about emissions between them (Section 4.3.5).
+
+An optional dependency is a nested fiber: `yield ctx.inject([key], apply).retire` adds behaviour while the key is provided and withdraws it when the key leaves. A dependency cycle is never satisfied, and `describe()` reports it from the declarations alone; split one member so what it provides is separate from what it requires.

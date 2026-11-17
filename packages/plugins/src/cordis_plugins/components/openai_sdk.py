@@ -24,6 +24,6 @@ def openai_sdk() -> Component:
                 clients[(api_key, base_url)] = AsyncOpenAI(api_key=api_key, base_url=base_url)
             return clients[(api_key, base_url)]
 
-        ctx.provide(OPENAI_CLIENTS, client)
+        yield ctx.provide(OPENAI_CLIENTS, client)
 
     return Component("openai sdk", apply=apply, provides=(OPENAI_CLIENTS,))

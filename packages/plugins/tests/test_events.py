@@ -26,10 +26,11 @@ async def test_every_handler_is_called_concurrently_and_publish_waits_for_them_a
         log.append(f"fast {event}")
         gate.set()
 
-    events.subscribe(PINGS, slow)
-    events.subscribe(PINGS, fast)
+    subscriptions = [events.subscribe(PINGS, slow), events.subscribe(PINGS, fast)]
     await events.publish(PINGS, "a")
     assert log == ["fast a", "slow a"]
+    for withdraw in subscriptions:
+        withdraw()
 
 async def test_a_topic_with_no_handlers_returns_at_once(events: Events) -> None:
     await events.publish(PINGS, "nobody")
@@ -43,11 +44,12 @@ async def test_a_failing_handler_stops_none_of_the_others_and_every_failure_is_r
     async def fine(event: str) -> None:
         log.append(event)
 
-    events.subscribe(PINGS, broken)
-    events.subscribe(PINGS, fine)
+    subscriptions = [events.subscribe(PINGS, broken), events.subscribe(PINGS, fine)]
     with pytest.raises(ExceptionGroup) as raised:
         await events.publish(PINGS, "a")
     assert log == ["a"]
+    for withdraw in subscriptions:
+        withdraw()
     [error] = raised.value.exceptions
     assert "of topic pings" in error.__notes__[0]
 
@@ -59,11 +61,12 @@ async def test_two_subscriptions_of_one_handler_withdraw_independently(events: E
         log.append(event)
 
     first = events.subscribe(PINGS, handler)
-    events.subscribe(PINGS, handler)
+    second = events.subscribe(PINGS, handler)
     await events.publish(PINGS, "a")
     first()
     await events.publish(PINGS, "b")
     assert log == ["a", "a", "b"]
+    second()
 
 async def test_topics_with_the_same_name_are_different_topics(events: Events) -> None:
     log: list[str] = []
@@ -71,6 +74,7 @@ async def test_topics_with_the_same_name_are_different_topics(events: Events) ->
     async def handler(event: str) -> None:
         log.append(event)
 
-    events.subscribe(Topic[str]("pings"), handler)
+    withdraw = events.subscribe(Topic[str]("pings"), handler)
     await events.publish(PINGS, "a")
     assert log == []
+    withdraw()

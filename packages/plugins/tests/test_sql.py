@@ -7,7 +7,7 @@ from typing import Awaitable, Callable
 
 import pytest
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry
 from cordis_plugins import (
     APPLICATION,
@@ -15,11 +15,11 @@ from cordis_plugins import (
     ConstraintViolation,
     Sql,
     SqlError,
+    background,
     get_env_os,
     postgres_pool,
     postgres_sql,
     run_application,
-    serve,
     sqlite_database,
     sqlite_sql,
 )
@@ -45,13 +45,15 @@ def provider(request: pytest.FixtureRequest, tmp_path: Path) -> list[Entry]:
 async def using(provider: list[Entry], steps: Callable[[Sql], Awaitable[None]]) -> None:
     # Runs steps with the provider's Sql once the application has started; what goes wrong in them is raised as itself.
     def talking() -> Component:
-        def apply(ctx: Context) -> None:
+        def apply(ctx: Context) -> Inverse:
             async def talk(stopping: asyncio.Event) -> None:
+                if not await ctx.get(APPLICATION).started():
+                    return
                 try:
                     await steps(ctx.get(SQL))
                 finally:
                     ctx.get(APPLICATION).end(0)
-            serve(ctx, "talking", talk)
+            return background(ctx, "talking", talk)
         return Component("talking", apply=apply, requires=(APPLICATION, SQL))
 
     outcome = await run_application([*provider, Entry("talking", talking)], signals=False)

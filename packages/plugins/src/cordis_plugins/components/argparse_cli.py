@@ -1,8 +1,8 @@
 import argparse
 import sys
-from typing import Any, NoReturn, Sequence
+from typing import Any, Iterator, NoReturn, Sequence
 
-from cordis import Component, Context, Entries, Inverse
+from cordis import Component, Context, Entries, Inverse, Undo
 
 from ..contracts import APPLICATION, ARGS, CLI, STDERR, STDOUT, Argument, Arguments, UsageError
 
@@ -40,8 +40,8 @@ class _Arguments:
     def __init__(self) -> None:
         self._registered: Entries[Argument[Any]] = Entries()
 
-    def add(self, argument: Argument[Any], /) -> Inverse:
-        return self._registered.add(argument)
+    def add(self, argument: Argument[Any], /) -> Undo:
+        return self._registered.add(argument, f"argument {argument.name}")
 
     def __iter__(self) -> Any:
         return iter(self._registered)
@@ -51,9 +51,9 @@ def argparse_cli(argv: Sequence[str] | None = None, prog: str | None = None) -> 
     # once the application has started, when every component that will register has. Only then does it provide ARGS,
     # so components reading values wait for it as they would for any key. Asked for help, it prints it and ends the
     # application; given a command line that does not match, it prints the usage and ends it with status 2.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         arguments = _Arguments()
-        ctx.provide(CLI, Arguments(add=arguments.add))
+        yield ctx.provide(CLI, Arguments(add=arguments.add))
         app = ctx.get(APPLICATION)
         given = list(sys.argv[1:] if argv is None else argv)
 
@@ -85,8 +85,10 @@ def argparse_cli(argv: Sequence[str] | None = None, prog: str | None = None) -> 
                 value: T = values[argument]
                 return value
 
-            ctx.provide(ARGS, read)
+            # Parsed once the application has started, long after this fiber's effect function returned: there is
+            # nothing to yield to, so the fiber adopts the binding.
+            ctx.adopt(ctx.provide(ARGS, read))
 
-        ctx.effect(lambda: app.when_started(parse), "parse once started")
+        yield app.when_started(parse)
 
     return Component("argparse cli", apply=apply, requires=(APPLICATION, STDOUT, STDERR), provides=(CLI, ARGS))

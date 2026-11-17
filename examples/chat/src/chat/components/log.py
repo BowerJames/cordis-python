@@ -1,25 +1,24 @@
-from cordis import Component, Context
-from cordis_plugins import EVENTS, STDOUT
+from cordis import Component, Context, Inverse
+from cordis_plugins import STDOUT
 
-from ..contracts import SESSION_CLOSED, SESSION_OPENED, SessionClosed, SessionOpened
+from ..contracts import SESSION_LOG, SessionClosed, SessionLog, SessionOpened
 
 
 def session_log() -> Component:
-    # A line on stdout as each session opens and closes, with why it failed when it did. Its subscriptions are its
-    # effects, so it hears every session for as long as it is loaded, and nothing once it is not.
-    def apply(ctx: Context) -> None:
-        async def opened(event: SessionOpened) -> None:
+    # A line on stdout as each session opens and closes, with why it failed when it did. Sessions depend on it, so it
+    # stays until the last of them has closed.
+    def apply(ctx: Context) -> Inverse:
+        def opened(event: SessionOpened) -> None:
             request = event.request
             ctx.get(STDOUT)(f"session {event.session} opened: {request.provider}/{request.model_name} "
                             f"as {request.agent_type}\n")
 
-        async def closed(event: SessionClosed) -> None:
+        def closed(event: SessionClosed) -> None:
             if event.failures:
                 ctx.get(STDOUT)(f"session {event.session} failed: {'; '.join(event.failures)}\n")
             else:
                 ctx.get(STDOUT)(f"session {event.session} closed\n")
 
-        ctx.effect(lambda: ctx.get(EVENTS).subscribe(SESSION_OPENED, opened), "log sessions opening")
-        ctx.effect(lambda: ctx.get(EVENTS).subscribe(SESSION_CLOSED, closed), "log sessions closing")
+        return ctx.provide(SESSION_LOG, SessionLog(opened=opened, closed=closed))
 
-    return Component("session log", apply=apply, requires=(EVENTS, STDOUT))
+    return Component("session log", apply=apply, requires=(STDOUT,), provides=(SESSION_LOG,))

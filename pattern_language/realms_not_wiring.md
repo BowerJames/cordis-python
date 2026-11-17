@@ -12,7 +12,7 @@ Handing each instance the keys it should use brings back wiring: every factory g
 
 ## Forces
 - **One provider per realm:** A second provider of a key in the same realm is refused when it is inserted.
-- **Sharing:** A session shares most of what the application has (the workspace, the providers on offer, the event bus) and binds only a few keys for itself.
+- **Sharing:** A session shares most of what the application has (the workspace, the providers on offer, the session log) and binds only a few keys for itself.
 - **Unchanged components:** The same server or tool should run alone or as one of many, without knowing which.
 - **Lifetime:** A session lasts as long as its connection, and everything it loaded must leave with it.
 - **Failure:** A session that fails must fail alone.
@@ -27,7 +27,7 @@ Entry("admin", children=[Entry("routes", route_table), Entry("server", asyncio_h
       isolate={ROUTES: True, SERVER_ADDRESS: True})
 ```
 
-runs a second route table and server, unchanged, whose routes reach that table alone. While the application runs, the group is a fiber: chat isolates each key in `SESSION_KEYS` on its context, uses a session component providing what the session is opened with (`CONNECTION`, `TOOLS`), and loads the session's entries beneath it with a loader of its own. A key that is not isolated resolves as before, so every session uses the application's workspace and event bus.
+runs a second route table and server, unchanged, whose routes reach that table alone. While the application runs, the group is a fiber: chat isolates each key in `SESSION_KEYS` on its context, uses a session component providing what the session is opened with (`CONNECTION`, `TOOLS`), and loads the session's entries beneath it with a loader of its own. A key that is not isolated resolves as before, so every session uses the application's workspace and session log.
 
 The fiber bounds the session's lifetime: disposing it reverts everything the session loaded. `APPLICATION.contain` bounds its failures: a failure anywhere beneath the fiber goes to the handler its opener gave, and the application runs on. A key that should have been isolated and was not is found at once, since a second session's provider of it is refused when inserted.
 

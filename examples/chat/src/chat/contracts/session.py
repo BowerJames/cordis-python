@@ -1,9 +1,9 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from cordis import Key
-from cordis_plugins import Socket, Topic
+from cordis_plugins import Socket
 
 from .conversation import MODEL
 from .tools import INJECT, SESSION_STATE, TOOLS
@@ -28,7 +28,7 @@ class Connection:
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     failures: list[str] = field(default_factory=list)
 
-# What chat publishes about the sessions it opens, for whoever wants to know: each opened is followed by one closed.
+# What chat tells a session log about the sessions it opens: each opened is followed by one closed.
 @dataclass(slots=True, frozen=True)
 class SessionOpened:
     # Numbered in the order sessions open, so that each closing can be matched to its opening.
@@ -42,8 +42,16 @@ class SessionClosed:
     # Each failure, with where it happened; empty when the session ended without failing.
     failures: tuple[str, ...] = ()
 
-SESSION_OPENED: Topic[SessionOpened] = Topic("session_opened")
-SESSION_CLOSED: Topic[SessionClosed] = Topic("session_closed")
+@dataclass(slots=True, frozen=True)
+class SessionLog:
+    # Told of each session as it opens, and again as it closes. A session tells it through a fiber of its own that
+    # requires this key, so the log is what the session depends on, and by the guard on L-Unload it cannot leave
+    # before every session it was told of has said it closed, even as the whole application ends (Theorem 70). An
+    # event bus could not promise that: a publisher and a subscriber are both its dependents, which nothing orders.
+    opened: Callable[[SessionOpened], None]
+    closed: Callable[[SessionClosed], None]
+
+SESSION_LOG: Key[SessionLog] = Key("session_log")
 
 CONNECTION: Key[Connection] = Key("connection")
 # Every key a session binds for itself, each isolated into a realm of the session's own, so every session binds them

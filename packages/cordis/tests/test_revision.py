@@ -6,8 +6,8 @@ GREETING: Key[str] = Key("greeting")
 
 def greeter(text: str) -> Component:
     # Configuration is bound into apply, so the same component given new text is a new component.
-    def apply(ctx: Context) -> None:
-        ctx.provide(GREETING, text)
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(GREETING, text)
     return Component("greeter", apply=apply, provides=(GREETING,))
 
 def listener(log: list[str]) -> Component:
@@ -47,8 +47,8 @@ async def test_a_failed_fiber_is_retried_by_revising_it(runtime: Runtime) -> Non
     assert retried.error is None
 
 async def test_a_revision_keeps_the_place_the_fiber_stood_in(runtime: Runtime) -> None:
-    def group(ctx: Context) -> None:
-        ctx.isolate(GREETING).use(greeter("inside"))
+    def group(ctx: Context) -> Inverse:
+        return ctx.isolate(GREETING).use(greeter("inside")).retire
 
     parent = runtime.root.use(Component("group", apply=group))
     await runtime.settled()

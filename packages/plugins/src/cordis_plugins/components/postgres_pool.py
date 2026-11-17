@@ -26,6 +26,6 @@ def postgres_pool(dsn: str | None = None, min_size: int = 1, max_size: int = 10)
                 raise
 
         yield close
-        ctx.provide(POSTGRES, pool)
+        yield ctx.provide(POSTGRES, pool)
 
     return Component("postgres pool", apply=apply, requires=(GET_ENV,), provides=(POSTGRES,))

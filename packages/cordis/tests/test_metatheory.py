@@ -1,4 +1,5 @@
 import random
+from typing import Iterator
 
 from cordis import Component, Context, Fiber, FiberState, Inverse, Key, Runtime, open_runtime
 from cordis.testing import Failures
@@ -10,12 +11,12 @@ B: Key[str] = Key("b")
 C: Key[str] = Key("c")
 
 def node(name: str, requires: tuple[Key[str], ...], provides: tuple[Key[str], ...], world: set[str]) -> Component:
-    def apply(ctx: Context) -> Inverse:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         inputs = ",".join(ctx.get(key) for key in requires)
         for key in provides:
-            ctx.provide(key, f"{name}({inputs})")
+            yield ctx.provide(key, f"{name}({inputs})")
         world.add(name)
-        return lambda: world.discard(name)
+        yield lambda: world.discard(name)
     return Component(name, apply=apply, requires=requires, provides=provides)
 
 def system(world: set[str]) -> list[Component]:

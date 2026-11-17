@@ -1,6 +1,6 @@
 from typing import Any
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 
 from ..contracts import SESSION_STATE, SessionState, StateKey
 
@@ -22,7 +22,7 @@ class _Values:
 
 def session_state() -> Component:
     # A fresh state each time it loads, once per session, for tools to keep what they learn between executions.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         values = _Values()
-        ctx.provide(SESSION_STATE, SessionState(get=values.get, set=values.set))
+        return ctx.provide(SESSION_STATE, SessionState(get=values.get, set=values.set))
     return Component("session state", apply=apply, provides=(SESSION_STATE,))

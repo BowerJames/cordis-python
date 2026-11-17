@@ -1,3 +1,5 @@
+from typing import Iterator
+
 from cordis import Component, Context, FiberState, Inverse, Key, Runtime
 
 from .helpers import state
@@ -5,11 +7,11 @@ from .helpers import state
 JOBS: Key[list[str]] = Key("jobs")
 
 def nest(log: list[str], name: str, *children: Component) -> Component:
-    def apply(ctx: Context) -> Inverse:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         log.append(f"{name} up")
+        yield lambda: log.append(f"{name} down")
         for child in children:
-            ctx.use(child)
-        return lambda: log.append(f"{name} down")
+            yield ctx.use(child).retire
     return Component(name, apply=apply)
 
 
@@ -50,21 +52,35 @@ async def test_a_child_disposed_on_its_own_is_not_retired_again(runtime: Runtime
     await parent.dispose()
     assert log.count("child down") == 1
 
+async def test_a_child_instantiated_once_its_parent_is_active_is_adopted(runtime: Runtime) -> None:
+    # Once the effect function has returned there is nothing to yield to, so the parent adopts the child's retire.
+    log: list[str] = []
+    contexts: list[Context] = []
+    parent = runtime.root.use(Component("parent", apply=contexts.append))
+    await runtime.settled()
+    child = contexts[0].use(nest(log, "child"))
+    contexts[0].adopt(child.retire)
+    await runtime.settled()
+    assert state(child) is FiberState.ACTIVE
+    await parent.dispose()
+    assert log == ["child up", "child down"]
+    assert child.removed
+
 async def test_inject_adds_behaviour_while_an_optional_key_is_provided(runtime: Runtime) -> None:
     # The optional-dependency pattern: a sub-fiber that requires the key, under a parent that does not.
     log: list[str] = []
 
-    def tool(ctx: Context) -> None:
+    def tool(ctx: Context) -> Inverse:
         log.append("foreground tool")
 
         def upgraded(inner: Context) -> Inverse:
             log.append(f"tool with {len(inner.get(JOBS))} jobs")
             return lambda: log.append("tool without jobs")
 
-        ctx.inject([JOBS], upgraded)
+        return ctx.inject([JOBS], upgraded).retire
 
-    def jobs(ctx: Context) -> None:
-        ctx.provide(JOBS, ["job"])
+    def jobs(ctx: Context) -> Inverse:
+        return ctx.provide(JOBS, ["job"])
 
     tool_fiber = runtime.root.use(Component("tool", apply=tool))
     await runtime.settled()
@@ -77,11 +93,11 @@ async def test_inject_adds_behaviour_while_an_optional_key_is_provided(runtime: 
 async def test_a_child_reads_what_its_parent_committed(runtime: Runtime) -> None:
     seen: list[list[str]] = []
 
-    def jobs(ctx: Context) -> None:
-        ctx.provide(JOBS, ["job"])
+    def jobs(ctx: Context) -> Inverse:
+        return ctx.provide(JOBS, ["job"])
 
-    def parent(ctx: Context) -> None:
-        ctx.use(Component("child", apply=lambda inner: seen.append(inner.get(JOBS))))
+    def parent(ctx: Context) -> Inverse:
+        return ctx.use(Component("child", apply=lambda inner: seen.append(inner.get(JOBS)))).retire
 
     runtime.root.use(Component("jobs", apply=jobs, provides=(JOBS,)))
     runtime.root.use(Component("parent", apply=parent, requires=(JOBS,)))

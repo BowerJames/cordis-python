@@ -19,12 +19,12 @@ def package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[s
     (root / "keys.py").write_text('from cordis import Key\nGREETING: Key[str] = Key("greeting")\n')
     (root / "text.py").write_text('TEXT = "hello"\n')
     (root / "greeter.py").write_text(
-        "from cordis import Component, Context\n"
+        "from cordis import Component, Context, Inverse\n"
         "from .keys import GREETING\n"
         f"from {name}.text import TEXT\n"
         "def greeter() -> Component:\n"
-        "    def apply(ctx: Context) -> None:\n"
-        "        ctx.provide(GREETING, TEXT)\n"
+        "    def apply(ctx: Context) -> Inverse:\n"
+        "        return ctx.provide(GREETING, TEXT)\n"
         '    return Component("greeter", apply=apply, provides=(GREETING,))\n'
     )
     (root / "listener.py").write_text(

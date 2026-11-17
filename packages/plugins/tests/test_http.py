@@ -1,9 +1,9 @@
 import asyncio
-from typing import Any
+from typing import Any, Iterator
 
 import pytest
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry
 from cordis_plugins import (
     HTTP,
@@ -34,8 +34,8 @@ async def test_every_exchange_is_shown_to_each_observer_and_observers_withdraw_i
 
     async def steps(ctx: Context) -> None:
         http = ctx.get(HTTP)
-        first = http.observe(lambda request, outcome: seen.append(f"first {request.url}"))
-        http.observe(lambda request, outcome: seen.append(f"second {request.url}"))
+        first = ctx.adopt(http.observe(lambda request, outcome: seen.append(f"first {request.url}")))
+        ctx.adopt(http.observe(lambda request, outcome: seen.append(f"second {request.url}")))
         await http.send(Request("GET", "https://a.example"))
         first()
         await http.send(Request("GET", "https://b.example"))
@@ -50,7 +50,7 @@ async def test_a_failed_exchange_is_shown_to_observers_and_raised() -> None:
     seen: list[Any] = []
 
     async def steps(ctx: Context) -> None:
-        ctx.get(HTTP).observe(lambda request, outcome: seen.append(outcome))
+        ctx.adopt(ctx.get(HTTP).observe(lambda request, outcome: seen.append(outcome)))
         with pytest.raises(HTTPConnectionError):
             await ctx.get(HTTP).send(Request("GET", "https://a.example"))
 
@@ -71,9 +71,9 @@ def slow_route() -> Component:
     async def hello(request: ServerRequest) -> ServerResponse:
         return ServerResponse(201, (("X-Seen", request.header("X-Sent") or ""),), request.body)
 
-    def apply(ctx: Context) -> None:
-        ctx.effect(lambda: ctx.get(ROUTES).add(Route("GET", "/slow", slow)))
-        ctx.effect(lambda: ctx.get(ROUTES).add(Route("POST", "/hello", hello)))
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.get(ROUTES).add(Route("GET", "/slow", slow))
+        yield ctx.get(ROUTES).add(Route("POST", "/hello", hello))
     return Component("routes", apply=apply, requires=(ROUTES,))
 
 @pytest.fixture(params=[httpx_http, http_requests], ids=["httpx", "requests"])
@@ -102,8 +102,9 @@ async def test_a_request_that_takes_longer_than_its_timeout_raises_http_timeout(
 
     outcome = await run_scenario([
         Entry("env", lambda: environment({})), Entry("routes", route_table),
-        Entry("server", asyncio_http_server, config={"port": 0}), Entry("http", client), Entry("app", slow_route),
-    ], steps, requires=(HTTP, SERVER_ADDRESS), grace=0.1)
+        Entry("server", asyncio_http_server, config={"port": 0, "grace": 0.1}), Entry("http", client),
+        Entry("app", slow_route),
+    ], steps, requires=(HTTP, SERVER_ADDRESS))
     assert [error for _, error in outcome.failures if isinstance(error, HTTPError)] == []
 
 def test_the_timeout_comes_from_the_environment_when_requests_do_not_say() -> None:

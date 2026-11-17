@@ -1,10 +1,10 @@
 import asyncio
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable, Iterator
 
 import httpx
 import requests
 
-from cordis import Component, Context, Entries, Inverse
+from cordis import Component, Context, Entries, Inverse, Undo
 
 from ..contracts import (
     GET_ENV,
@@ -55,8 +55,8 @@ class _Observed:
             observer(response.sent, response)
         return response
 
-    def observe(self, observer: Observer, /) -> Inverse:
-        return self._observers.add(observer)
+    def observe(self, observer: Observer, /) -> Undo:
+        return self._observers.add(observer, "observe requests")
 
 def observed_client(send: Callable[[Request], Awaitable[Response]]) -> HTTPClient:
     # The value every provider binds at HTTP: send, with the observing the contract promises around it.
@@ -90,7 +90,7 @@ def httpx_http() -> Component:
             return Response(status=answer.status_code, reason=answer.reason_phrase,
                             headers=tuple(answer.headers.multi_items()), body=answer.content, sent=sent)
 
-        ctx.provide(HTTP, observed_client(send))
+        yield ctx.provide(HTTP, observed_client(send))
 
     return Component("httpx http", apply=apply, requires=(GET_ENV,), provides=(HTTP,))
 
@@ -102,9 +102,10 @@ def _body(prepared: requests.PreparedRequest) -> bytes:
 
 def http_requests() -> Component:
     # Sends requests with the requests library, in a thread: bounded by a timeout, but the thread cannot be cancelled.
-    def apply(ctx: Context) -> Inverse:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         default = default_timeout(ctx.get(GET_ENV))
         session = requests.Session()
+        yield session.close
 
         def send_now(request: Request) -> Response:
             # requests takes headers as a mapping, so a repeated name is joined into one header.
@@ -137,8 +138,7 @@ def http_requests() -> Component:
             except TimeoutError as error:
                 raise HTTPTimeout(f"no response within {timeout}s") from error
 
-        ctx.provide(HTTP, observed_client(send))
-        return session.close
+        yield ctx.provide(HTTP, observed_client(send))
 
     return Component("http requests", apply=apply, requires=(GET_ENV,), provides=(HTTP,))
 
@@ -160,7 +160,7 @@ def recording_http(answer: Answer) -> tuple[Callable[[], Component], list[Reques
             raise answer
         return answer(made)
 
-    def apply(ctx: Context) -> None:
-        ctx.provide(HTTP, observed_client(send))
+    def apply(ctx: Context) -> Inverse:
+        return ctx.provide(HTTP, observed_client(send))
 
     return lambda: Component("recording http", apply=apply, provides=(HTTP,)), sent

@@ -1,12 +1,12 @@
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 
 from ..contracts import AGENT_TYPES, AgentProfile
 
 
 def _agent_type(profile: AgentProfile) -> Component:
     # Offers one agent type to every session: it is only data, so offering it is its one effect.
-    def apply(ctx: Context) -> None:
-        ctx.effect(lambda: ctx.get(AGENT_TYPES).offer(profile), f"offer {profile.slug}")
+    def apply(ctx: Context) -> Inverse:
+        return ctx.get(AGENT_TYPES).offer(profile)
     return Component(profile.slug, apply=apply, requires=(AGENT_TYPES,))
 
 def explorer() -> Component:

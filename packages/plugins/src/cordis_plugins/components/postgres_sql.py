@@ -8,7 +8,7 @@ from typing import Any, AsyncGenerator, Awaitable, Callable
 import asyncpg
 from asyncpg.pool import PoolConnectionProxy
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 
 from ..contracts import POSTGRES, SQL, ConstraintViolation, Parameters, Row, Sql, SqlError
 
@@ -164,7 +164,7 @@ async def _transaction(connection: _Connection, lock: asyncio.Lock) -> AsyncGene
 def postgres_sql() -> Component:
     # The SQL contract over a Postgres pool. Each statement outside a transaction takes a connection for itself, and
     # each transaction holds one until it ends, so transactions run side by side, each seeing only what is committed.
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Inverse:
         pool = ctx.get(POSTGRES)
         # The tasks holding a transaction, refused the pool's own statements as the contract says: on a database
         # with one connection, they would wait for themselves forever.
@@ -194,6 +194,6 @@ def postgres_sql() -> Component:
                 finally:
                     holding.discard(task)
 
-        ctx.provide(SQL, _sql(from_pool, transaction))
+        return ctx.provide(SQL, _sql(from_pool, transaction))
 
     return Component("postgres sql", apply=apply, requires=(POSTGRES,), provides=(SQL,))

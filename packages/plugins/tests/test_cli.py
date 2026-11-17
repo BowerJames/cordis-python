@@ -1,8 +1,9 @@
-from typing import Any
+from typing import Any, Iterator
 
-from cordis import Component, Context
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry
 from cordis_plugins import (
+    APPLICATION,
     ARGS,
     CLI,
     UsageError,
@@ -25,16 +26,15 @@ def greeter(seen: list[Any]) -> Component:
     def read(ctx: Context) -> None:
         args = ctx.get(ARGS)
         seen.append((args(NAME), args(TIMES), args(TAGS), args(LOUD)))
+        # Nothing ends an application but asking it to: the greeter is done once it has read what it was given.
+        ctx.get(APPLICATION).end(0)
 
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         for argument in (NAME, TIMES, TAGS, LOUD):
-            add(ctx, argument)
-        ctx.inject([ARGS], read)
+            yield ctx.get(CLI).add(argument)
+        yield ctx.inject([APPLICATION, ARGS], read).retire
 
     return Component("greeter", apply=apply, requires=(CLI,))
-
-def add(ctx: Context, argument: Any) -> None:
-    ctx.effect(lambda: ctx.get(CLI).add(argument))
 
 async def parse(argv: list[str], seen: list[Any]) -> tuple[int, str, str, bool]:
     capture, captured = capturing_stdio()

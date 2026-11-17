@@ -6,8 +6,9 @@ they make reverted when they leave, and every dependency they declare resolved, 
 
 The paper names two dimensions of dynamic composition, and this kernel supplies both:
 
-- **Temporal composability**, through **revertible effects**: every effect returns its own inverse, the runtime
-  accumulates the inverses of each fiber, and unloading applies them last in first out (§3.1).
+- **Temporal composability**, through **revertible effects**: every effect returns its own inverse, the component
+  yields each one from its effect function, the runtime accumulates them per fiber, and unloading applies them last in
+  first out (§3.1). An inverse a component was given and did not yield is caught at the next seam.
 - **Spatial composability**, through **reactive coeffects**: a component declares the keys it requires and provides;
   every change to what is provided is classified against those declarations, activating and deactivating fibers
   (§3.2).
@@ -58,9 +59,9 @@ from cordis import Component, Context, Inverse, Key, open_runtime
 GREETING: Key[Callable[[], str]] = Key("greeting")
 
 def greeter() -> Component:
-    # Provides a key: a revertible effect, withdrawn when the greeter unloads.
-    def apply(ctx: Context) -> None:
-        ctx.provide(GREETING, lambda: "hello")
+    # Provides a key: a revertible effect, whose inverse it yields, withdrawn when the greeter unloads.
+    def apply(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.provide(GREETING, lambda: "hello")
     return Component("greeter", apply=apply, provides=(GREETING,))
 
 def printer() -> Component:
@@ -89,6 +90,14 @@ hello, and goodbye
 from activating (a key nobody provides, a dependency cycle), the order a load from scratch activates them in, their
 states, and who provides what.
 
+Every effect a component performs, it yields the inverse of: `ctx.provide`, `ctx.use` (through the child's `retire`)
+and every registry operation (`ROUTES.add`, `EVENTS.subscribe`, `background`) hand one back, so the effect function reads
+as the list of everything unloading will undo, in the order it will undo it, and every yield is a seam where activation
+can stop. Every `Undo` made while the runtime drives a step is owed by that fiber, whichever operation made it, and one
+still unyielded at the next seam fails the activation (`UnyieldedInverse`); the runtime reverts the effect all the same. Where there is nothing to yield to, because the fiber is already active or the caller is an
+orchestrator, `ctx.adopt(inverse)` puts it on the accumulator at once; applying the `Undo` it returns reverts that one
+effect early.
+
 There is no boot order: the printer waits until the greeting is provided. Disposing the greeter first stops it
 providing (`L-Leave`), lets the printer unload while the greeting is still bound, and only then withdraws it
 (`L-Unload`, behind its guard).
@@ -100,14 +109,15 @@ providing (`L-Leave`), lets the printer unload while the greeting is still bound
 | Key `k` with value type `𝒱ₖ` | `Key[T]`, compared by identity |
 | Effect function `𝔈Γ`, effect iterator `ℑΓ` (Defs. 8, 17) | an `Activation`: an inverse, an awaitable of one, or a sync or async iterator yielding them |
 | Accumulator `φ`, `recover` (Defs. 2, 6) | `Accumulator`, applied last in first out |
-| `effect` (Def. 12), Algorithm 1 | `ctx.effect(callback)`, returning an `Effect` disposed at most once |
-| `set(k, v)` (Def. 20) | `ctx.provide(key, value)`: an effect whose inverse withdraws the binding |
+| `effect` (Def. 12), Algorithm 1 | yielding an inverse from the effect function; `ctx.adopt(inverse)` outside it |
+| A witnessed inverse (Def. 8) | `Undo`: an inverse that knows whether it is held, applied at most once; `compose` for several |
+| `set(k, v)` (Def. 20) | `ctx.provide(key, value)`: performs the binding, and returns the `Undo` that withdraws it |
 | Provider function of metadata (Def. 26) | `ctx.provide_by(key, factory)` |
 | `isolate`, `intercept` (Defs. 25, 27) | `ctx.isolate(key, realm)`, `ctx.intercept(key, metadata)`: derived contexts |
 | Component `(d, p, e)` (Def. 48) | `Component(name, apply, requires, provides)` |
 | Fiber `⟨d, p, e, π, σ, τ, θ⟩` (Def. 49) | `Fiber`: `component`, `parent`, `table`, `retired`, `state`, with `committed` as `ω` |
-| `O-Insert` with instantiation (Def. 52) | `ctx.use(component)`, whose inverse is the child's `O-Retire` |
-| `O-Retire`, `O-Remove` | `fiber.retire()`; removal is taken as soon as its premises hold |
+| `O-Insert` with instantiation (Def. 52) | `ctx.use(component)`, whose inverse is the child's `O-Retire`, `fiber.retire` |
+| `O-Retire`, `O-Remove` | `fiber.retire()`, the same `Undo`; removal is taken as soon as its premises hold |
 | `L-Begin`, `L-Iter`, `L-Finish`, `L-Divert`, `L-Leave`, `L-Unload` | `Runtime.refresh` and `Runtime._drive` |
 | Algorithm 6, proxy access | `ctx.get(key)`, checked against the declaring fiber's committed view |
 | A commutative, witnessed coeffect (Def. 46) | `Entries`: each addition an entry of its own |
@@ -161,10 +171,10 @@ can be changed while the application runs, where the microkernel plans a fixed b
 | `kernel.register(...)`, `kernel.replace(TOKEN, plugin)` | a list of `Entry`s with stable ids; `patched(entries, Entry(id, ...))` swaps one, at runtime too through `Loader.load` |
 | `kernel.describe()` | `describe(entries)`: the order a load from scratch activates them in, and why, without running anything |
 | a capability introduced by one plugin | a key provided by one component |
-| a slot, contributed before boot and collected | a key whose value is a table, each addition its own entry and its own effect (`RouteTable`, `Catalog`, `Arguments`, `Events`) |
+| a slot, contributed before boot and collected | a key whose value is a table, each addition its own entry, whose `Undo` its contributor yields (`RouteTable`, `Catalog`, `Arguments`, `Events`) |
 | adapting a capability (`verbose` wrapping the HTTP requester) | observing it: `HTTP.observe` is a registration of its own, so it needs no place in any order |
 | `server_cli` adapting the environment for the server | `server_cli` instantiating the server once the command line is parsed, with host and port bound into it |
-| services, `END`, `STARTED`, `kernel.run()` | `run_application(entries)`: `serve(ctx, label, work)` for running work, `APPLICATION.end`, `when_started`; ending stops served work in dependency order, then unloads everything |
+| services, `END`, `STARTED`, `kernel.run()` | `run_application(entries)`: a server binds and accepts as it activates and yields what closes it; `background(ctx, label, work)` runs a fiber's work, failing the fiber if it raises; `APPLICATION.end`, and `when_started` for emissions once the first load has quiesced; ending closes the runtime, which unloads dependents first |
 | a scope opened per websocket connection | a session group whose session keys are isolated into realms of its own; its failures are contained to it |
 
 Some behaviour comes from the framework rather than from the examples: routes live in their own table, so a server
@@ -192,6 +202,18 @@ replace real modules written to a temporary package, including a failed import t
 
 ## Where this departs from Cordis
 
+- A fiber whose own work fails once it is active takes the route the paper gives an activation that raises (§4.4):
+  it leaves, unloads, and rests failed (`ctx.fail`). The paper defines failure for iterations alone.
+- An application runs until something ends it, and ending it closes the runtime, nothing more: the guard on L-Unload
+  orders the teardown. A route's withdrawal waits for the requests it is still answering (§6.2), so a contributor
+  finishes what it took on while still loaded. `when_started` marks the first load's quiescence (Definition 53), a
+  property of the whole state that no rule reads, so it is kept for emissions, and for the command line, which can
+  only be read once every component has registered its arguments.
+
+- There is no `ctx.effect`: a component yields every inverse itself, and an operation performed for it (`provide`,
+  `use`, a registration) gives the inverse back rather than taking it. What it does not yield or adopt is caught: at the
+  next seam during activation, as the fiber unloads otherwise, and as a `DroppedInverse` warning for an `Undo` that
+  nobody ever held.
 - Inverses run one at a time, newest first, as Theorem 16 has them; Cordis starts asynchronous disposers together.
 - A second provider of a key in a realm is refused when it is inserted (O-Insert's premise), not when it provides.
 - A failed fiber is not retried until it is revised (§4.4); `fiber.revise()` is that revision.

@@ -1,13 +1,15 @@
-from cordis import Component, Context, Key, Runtime
+from typing import Iterator
+
+from cordis import Component, Context, Inverse, Key, Runtime
 
 DB: Key[str] = Key("db")
 GREET: Key[str] = Key("greet")
 URL: Key[str] = Key("url")
 
 def made(name: str, requires: tuple[Key[str], ...] = (), provides: tuple[Key[str], ...] = ()) -> Component:
-    def apply(ctx: Context) -> None:
+    def apply(ctx: Context) -> Iterator[Inverse]:
         for key in provides:
-            ctx.provide(key, name)
+            yield ctx.provide(key, name)
     return Component(name, apply=apply, requires=requires, provides=provides)
 
 
@@ -70,9 +72,9 @@ async def test_describe_shows_the_fiber_tree_realms_and_failures(runtime: Runtim
     def broken(ctx: Context) -> None:
         raise RuntimeError("no port")
 
-    def group(ctx: Context) -> None:
-        ctx.isolate(DB).use(made("tenant db", provides=(DB,)))
-        ctx.use(Component("server", apply=broken))
+    def group(ctx: Context) -> Iterator[Inverse]:
+        yield ctx.isolate(DB).use(made("tenant db", provides=(DB,))).retire
+        yield ctx.use(Component("server", apply=broken)).retire
 
     runtime.root.use(Component("group", apply=group))
     await runtime.settled()

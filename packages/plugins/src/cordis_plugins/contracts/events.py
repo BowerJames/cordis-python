@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Protocol
 
-from cordis import Inverse, Key
+from cordis import Key, Undo
 
 # Every event bus keeps these promises: publish calls every handler subscribed to the topic, concurrently, and returns
 # once they have all returned; a topic with no handlers returns at once. A handler that raises never stops the others:
@@ -23,7 +23,7 @@ class Topic[T]:
         return f"Topic({self.name!r})"
 
 class Subscribe(Protocol):
-    def __call__[T](self, topic: Topic[T], handler: EventHandler[T], /) -> Inverse: ...
+    def __call__[T](self, topic: Topic[T], handler: EventHandler[T], /) -> Undo: ...
 
 class Publish(Protocol):
     def __call__[T](self, topic: Topic[T], event: T, /) -> Awaitable[None]: ...
