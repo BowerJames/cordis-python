@@ -2,7 +2,7 @@ import json
 from typing import AsyncIterator, Iterator
 
 from cordis import Component, Context, Inverse
-from cordis_plugins import ROUTES, SERVER_ADDRESS, SQL, Route, ServerRequest, ServerResponse
+from cordis_plugins import ROUTES, SQL, Route, ServerRequest, ServerResponse
 
 from ..contracts import ITEMS, Item, Items
 
@@ -65,8 +65,10 @@ def _items_api(ctx: Context) -> Iterator[Inverse]:
             return ServerResponse.json({"error": "send {\"name\": ...}"}, status=400)
         item = await ctx.get(ITEMS).add(str(name))
         created = ServerResponse.json({"id": item.id, "name": item.name}, status=201)
-        address = ctx.find(SERVER_ADDRESS)
-        location = f"{address or ''}/items/{item.id}"
+        # Absolute, against the host the client asked for: the request says where it was sent, which is the address
+        # the client can reach, whatever the server bound. Without one, the location is relative to the request.
+        host = request.header("host")
+        location = f"{'http://' + host if host else ''}/items/{item.id}"
         return ServerResponse(status=201, headers=(*created.headers, ("Location", location)), body=created.body)
 
     async def get(request: ServerRequest) -> ServerResponse:

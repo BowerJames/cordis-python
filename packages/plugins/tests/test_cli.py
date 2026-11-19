@@ -32,7 +32,7 @@ def greeter(seen: list[Any]) -> Component[None]:
     def apply(ctx: Context) -> Iterator[Inverse]:
         for argument in (NAME, TIMES, TAGS, LOUD):
             yield ctx.get(CLI).add(argument)
-        yield ctx.inject([APPLICATION, ARGS], read).retire
+        yield ctx.while_provided([APPLICATION, ARGS], read).retire
 
     return Component("greeter", apply=apply, requires=(CLI,))
 

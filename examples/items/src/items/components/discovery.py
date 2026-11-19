@@ -33,7 +33,7 @@ def _discovery(ctx: Context) -> Iterator[Inverse]:
         return ServerResponse.json({"address": state.address, "registered": state.registered})
 
     yield ctx.get(ROUTES).add(Route("GET", "/discovery", status))
-    yield ctx.inject([APPLICATION, SERVER_ADDRESS, STDOUT], registration, name="registration").retire
+    yield ctx.while_provided([APPLICATION, SERVER_ADDRESS, STDOUT], registration, name="registration").retire
 
 # Serves its own status, and registers with discovery while a server is answering: the registration is a child
 # requiring the server's address, so it begins once the server has bound, and as the application ends it is told

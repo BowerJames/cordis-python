@@ -3,6 +3,7 @@ import itertools
 from typing import AsyncIterator, Iterator
 
 from cordis import Component, Context, Entries, FiberState, Inverse, Key, Runtime, Undo, UnyieldedInverse
+from cordis.orchestration import fiber_of
 from cordis.testing import Failures
 
 from .helpers import state
@@ -83,7 +84,7 @@ async def test_every_yield_is_a_seam_the_runtime_takes_an_inverse_at(runtime: Ru
 
     def apply(ctx: Context) -> Iterator[Inverse]:
         for step in ("first", "second", "third"):
-            seen.append(len(ctx.fiber.accumulator))
+            seen.append(len(fiber_of(ctx).accumulator))
             yield lambda step=step: log.append(f"undo {step}")  # type: ignore[misc]
 
     fiber = runtime.root.use(Component("stepped", apply=apply))
@@ -107,7 +108,7 @@ async def test_an_inverse_left_unyielded_fails_the_activation_and_is_still_appli
     assert failures.reported == [
         ("forgetful", "forgetful did not yield the inverse of provide number before its next step")]
     assert fiber.table == {}
-    assert runtime.root.find(NUMBER) is None
+    assert runtime.lookup(NUMBER) is None
 
 async def test_an_inverse_is_yielded_before_the_next_seam(runtime: Runtime, failures: Failures) -> None:
     # At every seam the accumulator must hold the inverse of everything done so far, or stopping there would strand

@@ -130,6 +130,8 @@ providing (`L-Leave`), lets the printer unload while the greeting is still bound
 | `O-Retire`, `O-Remove` | `fiber.retire()`, the same `Undo`; removal is taken as soon as its premises hold |
 | `L-Begin`, `L-Iter`, `L-Finish`, `L-Divert`, `L-Leave`, `L-Unload` | `Runtime.refresh` and `Runtime._drive` |
 | Algorithm 6, proxy access | `ctx.get(key)`, checked against the declaring fiber's committed view |
+| An optional dependency, as a nested fiber | `ctx.while_provided(keys, apply)`: a child whose `d` is keys, so it comes and goes with them |
+| The context paradigm (§3.3) | `Context` offers only the operations above; an orchestrator uses `Fiber` handles, `runtime.lookup(key)` and `cordis.orchestration` |
 | A commutative, witnessed coeffect (Def. 46) | `Entries`: each addition an entry of its own |
 
 ## Configuration, and running the examples

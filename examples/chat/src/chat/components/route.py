@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from itertools import count
 from typing import AsyncIterator, Iterator, Sequence
 
-from cordis import Component, Context, Fiber, FiberState, Inverse, Runtime
+from cordis import Component, Context, Inverse
 from cordis_loader import Entry, Loader
 from cordis_plugins import APPLICATION, ROUTES, Socket, SocketRoute
 
@@ -25,15 +25,6 @@ from ..contracts import (
 )
 from .catalog import catalog
 
-
-def _subtree(runtime: Runtime, fiber: Fiber) -> list[Fiber]:
-    return [fiber, *(member for child in runtime.children(fiber) for member in _subtree(runtime, child))]
-
-def _unsatisfied(runtime: Runtime, fiber: Fiber) -> list[str]:
-    # What keeps any part of a settled session from activating: each key nothing in reach provides.
-    return [f"{member.name} requires {key.name}, which nothing provides"
-            for member in _subtree(runtime, fiber) if member.state is FiberState.INACTIVE
-            for key in member.component.requires if runtime.provider(member.realms[key]) is None]
 
 @dataclass(frozen=True, slots=True)
 class ChatConfig:
@@ -98,9 +89,9 @@ def _chat(ctx: Context, config: ChatConfig) -> Iterator[Inverse]:
 
         release = ctx.adopt(app.contain(fiber, failed))
         try:
-            await ctx.runtime.settled(under=fiber)
+            await fiber.settled()
             if not connection.finished.is_set():
-                missing = _unsatisfied(ctx.runtime, fiber)
+                missing = fiber.unsatisfied()
                 if missing:
                     connection.failures.extend(missing)
                     connection.finished.set()

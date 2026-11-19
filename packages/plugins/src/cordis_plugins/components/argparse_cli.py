@@ -76,7 +76,7 @@ def _argparse_cli(ctx: Context, config: CliConfig) -> Iterator[Inverse]:
         except UsageError as error:
             ctx.get(STDERR)(f"{parser.format_usage()}{parser.prog}: error: {error}\n")
             app.end(2)
-            app.fail(error, "argparse cli", ctx.fiber)
+            app.fail(error, "argparse cli")
             return
         values: dict[Argument[Any], Any] = {
             argument: tuple(parsed[dest]) if argument.kind == "repeated" else parsed[dest]

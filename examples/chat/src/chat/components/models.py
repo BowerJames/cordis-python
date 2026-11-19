@@ -64,11 +64,10 @@ def _offering(name: str, variable: str, provider: Callable[[Context], Provider])
     # Offers a provider to every session, and says as it loads when the provider has no key: the server still starts,
     # for the providers that do, and sessions asking for this one fail when they open.
     def apply(ctx: Context) -> Inverse:
-        write = ctx.find(STDERR)
-        if not ctx.get(GET_ENV)(variable) and write is not None:
-            write(f"{variable} is not set, so sessions asking for {name} will fail\n")
+        if not ctx.get(GET_ENV)(variable):
+            ctx.get(STDERR)(f"{variable} is not set, so sessions asking for {name} will fail\n")
         return ctx.get(PROVIDERS).offer(provider(ctx))
-    return Component(name, apply, requires=(PROVIDERS, OPENAI_CLIENTS, GET_ENV))
+    return Component(name, apply, requires=(PROVIDERS, OPENAI_CLIENTS, GET_ENV, STDERR))
 
 class _Refused(Exception):
     def __init__(self, code: str | None, message: str) -> None:

@@ -4,7 +4,7 @@ import itertools
 import logging
 from contextlib import asynccontextmanager
 from enum import Enum
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Coroutine, Mapping
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Coroutine, Mapping, TypeVar, cast
 
 from .component import Component
 from .effect import Accumulator, Inverse, Undo, execute, stepping, unowned
@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from .context import Context
 
 logger = logging.getLogger("cordis")
+
+T = TypeVar("T")
 
 class FiberState(Enum):
     # The lifecycle θ of Definition 49. A fiber rests at INACTIVE or ACTIVE; LOADING (the paper's Reloading) and
@@ -195,6 +197,17 @@ class Fiber:
             self.config = previous
         return await self.revise(config=config)
 
+    async def settled(self) -> None:
+        # Waits until neither this fiber nor anything it instantiated has a transition in flight: for whoever
+        # instantiated it, such as a session's opener, without waiting on the rest of the system.
+        await self.runtime.settled(under=self)
+
+    def unsatisfied(self) -> list[str]:
+        # What keeps any part of this fiber's subtree from activating: each declared key nothing in reach provides.
+        return [f"{member.name} requires {key.name}, which nothing provides"
+                for member in self.runtime.subtree(self) if member.state is FiberState.INACTIVE
+                for key in member.component.requires if self.runtime.provider(member.realms[key]) is None]
+
     def __repr__(self) -> str:
         return f"Fiber({self.name!r}, uid={self.uid}, {self.state.value})"
 
@@ -225,6 +238,10 @@ class Runtime:
     def children(self, fiber: Fiber) -> tuple[Fiber, ...]:
         return tuple(child for child in self._fibers.values() if child.parent is fiber)
 
+    def subtree(self, fiber: Fiber) -> list[Fiber]:
+        # The fiber and everything it instantiated, transitively.
+        return [fiber, *(member for child in self.children(fiber) for member in self.subtree(child))]
+
     def owner(self, realm: RealmId) -> Fiber | None:
         return self._owners.get(realm)
 
@@ -235,6 +252,17 @@ class Runtime:
         if owner is not None and owner.state is FiberState.ACTIVE and realm in owner.table:
             return owner
         return None
+
+    def lookup(self, key: Key[T], realm: RealmId | None = None) -> T | None:
+        # What an active fiber binds at key, in its own realm unless another is named, or None: for an orchestrator
+        # inspecting the system from outside, as a test or an entrypoint does. A component never reads this way. What
+        # it reads it declares, so it activates against it and follows it (Algorithm 6); what it does only while a key
+        # is there is a child of its own that requires the key.
+        chosen = key if realm is None else realm
+        provider = self.provider(chosen)
+        if provider is None:
+            return None
+        return cast(T, provider.table[chosen].resolve({}))
 
     def target(self, fiber: Fiber) -> View | None:
         # Definition 53: None (⊥) when the fiber is retired or its declared keys are not all provided; otherwise
@@ -296,10 +324,10 @@ class Runtime:
     def insert(self, component: Component[Any], ctx: "Context", config: Any = None) -> Fiber:
         # O-Insert, under the fiber owning ctx. Its last premise is the single-source discipline: no realm gets a
         # second possible provider.
-        parent = ctx.fiber
+        parent = ctx._fiber
         if parent.removed:
             raise InsertionError(f"{parent.name} has left the registry, so nothing can be inserted under it")
-        fixed = {key: ctx.realm(key) for key in (*component.requires, *component.provides)}
+        fixed = {key: ctx._realm(key) for key in (*component.requires, *component.provides)}
         for key in component.provides:
             other = self._owners.get(fixed[key])
             if other is not None:
@@ -307,7 +335,7 @@ class Runtime:
                     f"{component.name} provides {key.name}, which {other.name} already provides in the same realm"
                 )
         fiber = Fiber(self, next(self._uids), component, parent, fixed, config)
-        fiber.ctx = ctx.derive(fiber)
+        fiber.ctx = ctx._derive(fiber)
         fiber.origin = ctx
         self._fibers[fiber.uid] = fiber
         for key in component.provides:
@@ -318,7 +346,7 @@ class Runtime:
     def instantiate(self, ctx: "Context", component: Component[Any], config: Any = None) -> Fiber:
         # Definition 52: an iteration of the parent that inserts a child, and yields the child's O-Retire as its
         # inverse. Retire rather than remove, because an inverse must apply wherever it is reached.
-        parent = ctx.fiber
+        parent = ctx._fiber
         self.check_effectful(parent)
         fiber = self.insert(component, ctx, config)
         if parent is self.root_fiber:
@@ -535,11 +563,8 @@ class Runtime:
                 await asyncio.wait(pending)
             return
 
-        def subtree(fiber: Fiber) -> list[Fiber]:
-            return [fiber, *(member for child in self.children(fiber) for member in subtree(child))]
-
         while True:
-            members = subtree(under)
+            members = self.subtree(under)
             pending = {fiber.inertia for fiber in members if fiber.inertia is not None and not fiber.inertia.done()}
             if not pending:
                 return

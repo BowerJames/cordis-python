@@ -1,12 +1,14 @@
 - case: get_returns_the_type_the_key_carries
   main: |
-    from cordis import Context, Key
+    from cordis import Context, Key, Runtime
 
     NUMBER: Key[int] = Key("number")
 
     def apply(ctx: Context) -> None:
         reveal_type(ctx.get(NUMBER))  # N: Revealed type is "int"
-        reveal_type(ctx.find(NUMBER))  # N: Revealed type is "int | None"
+
+    def probe(runtime: Runtime) -> None:
+        reveal_type(runtime.lookup(NUMBER))  # N: Revealed type is "int | None"
 
 - case: provide_rejects_a_value_of_another_type
   main: |

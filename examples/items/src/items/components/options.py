@@ -29,7 +29,7 @@ def _server_cli(ctx: Context, config: ServerCliConfig) -> Iterator[Inverse]:
 
     yield ctx.get(CLI).add(HOST)
     yield ctx.get(CLI).add(PORT)
-    yield ctx.inject([ARGS], with_arguments, name="server").retire
+    yield ctx.while_provided([ARGS], with_arguments, name="server").retire
 
 # The server's command-line options, in one component. Once they are parsed it instantiates the server with them as its
 # configuration: the server knows nothing of a command line, and it is the server's parent, so it leaves with it. A run
@@ -46,7 +46,7 @@ def _routes_command_listing(ctx: Context) -> None:
 
 def _routes_command(ctx: Context) -> Iterator[Inverse]:
     yield ctx.get(CLI).add(LIST_ROUTES)
-    yield ctx.inject([APPLICATION, ARGS, ROUTES, STDOUT], _routes_command_listing, name="route _routes_command_listing").retire
+    yield ctx.while_provided([APPLICATION, ARGS, ROUTES, STDOUT], _routes_command_listing, name="route listing").retire
 
 # --routes prints the route table and ends the application. Routes live in their own table, so they are all there
 # once everything has loaded, whether or not any server is.

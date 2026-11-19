@@ -31,7 +31,7 @@ def system(world: set[str]) -> list[Component[None]]:
 async def snapshot(runtime: Runtime) -> tuple[frozenset[tuple[str, FiberState]], str | None]:
     await runtime.settled()
     assert runtime.quiet()
-    return frozenset((fiber.name, fiber.state) for fiber in runtime.fibers()), runtime.root.find(C)
+    return frozenset((fiber.name, fiber.state) for fiber in runtime.fibers()), runtime.lookup(C)
 
 
 async def test_the_quiescent_state_does_not_depend_on_the_order_of_insertion() -> None:

@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from cordis import Context
+from cordis.orchestration import runtime_of
 from cordis_loader import Entry, patched
 from cordis_plugins import (
     HTTP,
@@ -89,7 +90,7 @@ Activation order (unloaded in reverse):
   2. stdio
   3. env
   4. routes
-  5. server      after routes (routes), env (get_env)
+  5. server      after routes (routes), env (get_env), stdio (stderr)
   6. health      after routes (routes)
   7. echo        after routes (routes)
   8. announce    after application (application), server (server_address), routes (routes), stdio (stdout)
@@ -107,7 +108,7 @@ Entries:
 Keys:
   application         provided by application; required by announce
   stdout              provided by stdio; required by announce
-  stderr              provided by stdio
+  stderr              provided by stdio; required by server
   stdout_is_terminal  provided by stdio
   stderr_is_terminal  provided by stdio
   get_env             provided by env; required by server
@@ -127,8 +128,8 @@ async def test_two_servers_kept_apart_each_answer_only_their_own_routes() -> Non
 
     async def steps(ctx: Context) -> None:
         main = ctx.get(SERVER_ADDRESS)
-        group = next(fiber for fiber in ctx.runtime.fibers() if fiber.name == "admin")
-        inner = next(fiber for fiber in ctx.runtime.children(group) if fiber.name == "asyncio http server")
+        group = next(fiber for fiber in runtime_of(ctx).fibers() if fiber.name == "admin")
+        inner = next(fiber for fiber in runtime_of(ctx).children(group) if fiber.name == "asyncio http server")
         admin = inner.table[inner.realms[SERVER_ADDRESS]].value
         http = ctx.get(HTTP)
         seen["main health"] = (await http.send(Request("GET", f"{main}/health"))).status

@@ -66,7 +66,7 @@ async def test_a_child_instantiated_once_its_parent_is_active_is_adopted(runtime
     assert log == ["child up", "child down"]
     assert child.removed
 
-async def test_inject_adds_behaviour_while_an_optional_key_is_provided(runtime: Runtime) -> None:
+async def test_while_provided_adds_behaviour_while_a_key_is_provided(runtime: Runtime) -> None:
     # The optional-dependency pattern: a sub-fiber that requires the key, under a parent that does not.
     log: list[str] = []
 
@@ -77,7 +77,7 @@ async def test_inject_adds_behaviour_while_an_optional_key_is_provided(runtime: 
             log.append(f"tool with {len(inner.get(JOBS))} jobs")
             return lambda: log.append("tool without jobs")
 
-        return ctx.inject([JOBS], upgraded).retire
+        return ctx.while_provided([JOBS], upgraded).retire
 
     def jobs(ctx: Context) -> Inverse:
         return ctx.provide(JOBS, ["job"])

@@ -77,7 +77,8 @@ def application(run: ApplicationRun) -> Component[None]:
     # bound into the effect function, so each run's component is one of its own.
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(APPLICATION, Application(when_started=run.when_started, started=run.wait_started, end=run.end,
-                                                    fail=run.fail, contain=run.contain))
+                                                    fail=lambda error, where: run.fail(error, where),
+                                                    contain=run.contain))
     return Component("application", apply, provides=(APPLICATION,))
 
 APPLICATION_ENTRY = "application"

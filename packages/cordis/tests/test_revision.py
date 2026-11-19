@@ -73,6 +73,6 @@ async def test_a_revision_keeps_the_place_the_fiber_stood_in(runtime: Runtime) -
     await runtime.settled()
     assert revised.parent is parent
     assert revised.realms[GREETING] is child.realms[GREETING]
-    assert runtime.root.find(GREETING) is None
+    assert runtime.lookup(GREETING) is None
     await parent.dispose()
     assert runtime.fibers() == ()

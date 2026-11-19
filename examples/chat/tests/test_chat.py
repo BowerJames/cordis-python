@@ -11,6 +11,7 @@ from chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, T
 from chat.entrypoints import tui
 from chat.entrypoints.server import compose, session, with_a_session
 from cordis import Component, Context, Inverse, Runtime
+from cordis.orchestration import runtime_of
 from cordis_loader import Entry, patched, without
 from cordis_plugins import (
     APPLICATION,
@@ -253,7 +254,7 @@ async def test_a_new_session_template_reaches_the_sessions_already_open(root: Pa
         kept.append(client.closed is None)
         await client.leave()
 
-    probe = Component("probe", lambda ctx: runtimes.append(ctx.runtime))
+    probe = Component("probe", lambda ctx: runtimes.append(runtime_of(ctx)))
     await composed(conversation, root, replies, turns, entries=[*compose(), Entry("probe", probe)])
     assert kept == [True, True]
     assert [[tool.name for tool in turn.tools] for turn in turns] == [["listDir", "grep", "read"], ["listDir", "read"]]

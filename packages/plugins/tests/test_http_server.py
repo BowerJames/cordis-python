@@ -5,6 +5,7 @@ from typing import Any, AsyncIterator, Iterator
 import pytest
 
 from cordis import Component, Context, Inverse
+from cordis.orchestration import runtime_of
 from cordis_loader import Entry, Loader, patched
 from cordis_plugins import (
     HTTP,
@@ -95,7 +96,7 @@ async def test_a_route_withdrawn_while_the_server_runs_is_404_from_the_next_requ
     async def steps(ctx: Context) -> None:
         base, http = ctx.get(SERVER_ADDRESS), ctx.get(HTTP)
         assert (await http.send(Request("GET", f"{base}/greet/ada"))).status == 200
-        contributor = next(fiber for fiber in ctx.runtime.fibers() if fiber.name == "routes contributor")
+        contributor = next(fiber for fiber in runtime_of(ctx).fibers() if fiber.name == "routes contributor")
         await contributor.dispose()
         assert (await http.send(Request("GET", f"{base}/greet/ada"))).status == 404
 
@@ -107,19 +108,20 @@ async def test_swapping_the_server_leaves_every_route_where_it_is() -> None:
     # The route table is its own key, so replacing the server entry reloads the server alone: the contributor is not
     # touched, and the new server answers its route.
     async def steps(ctx: Context) -> None:
-        contributor = next(fiber for fiber in ctx.runtime.fibers() if fiber.name == "routes contributor")
-        loader = Loader(ctx.runtime.root)
+        contributor = next(fiber for fiber in runtime_of(ctx).fibers() if fiber.name == "routes contributor")
+        loader = Loader(runtime_of(ctx).root)
         swapped = [Entry("server", fastapi_http_server, config={"port": 0})]
         await loader.load(swapped)
-        await ctx.runtime.settled()
-        address = ctx.runtime.root.find(SERVER_ADDRESS)
+        await runtime_of(ctx).settled()
+        address = runtime_of(ctx).lookup(SERVER_ADDRESS)
         assert address is not None
         answered = await ctx.get(HTTP).send(Request("GET", f"{address}/greet/ada"))
         assert (answered.status, answered.text()) == (200, "hello ada")
         assert not contributor.removed
         await loader.load([])
 
-    entries = [Entry("env", environment), Entry("routes", route_table), Entry("http", httpx_http),
+    entries = [Entry("stdio", capturing_stdio()[0]), Entry("env", environment), Entry("routes", route_table),
+               Entry("http", httpx_http),
                Entry("app", routes(added=[Route("GET", "/greet/{name}", greet)]))]
     outcome = await run_scenario(entries, steps, requires=(HTTP,))
     assert outcome.failures == ()

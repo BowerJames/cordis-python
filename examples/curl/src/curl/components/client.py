@@ -85,7 +85,7 @@ def _curl(ctx: Context) -> Iterator[Inverse]:
     # Each argument is registered for as long as curl is loaded: registering gives back the inverse it yields.
     for argument in (URL, METHOD, HEADERS, DATA, INCLUDE, MAX_TIME):
         yield ctx.get(CLI).add(argument)
-    yield ctx.inject([APPLICATION, ARGS, HTTP, STDOUT, STDOUT_IS_TERMINAL], _curl_fetch, name="fetch").retire
+    yield ctx.while_provided([APPLICATION, ARGS, HTTP, STDOUT, STDOUT_IS_TERMINAL], _curl_fetch, name="fetch").retire
 
 # Registers its arguments as it loads; the fetch is a child that requires the parsed arguments, so it activates
 # once the command line has been parsed, and makes the one request the application exists for.
@@ -116,7 +116,7 @@ def _verbose_observe(ctx: Context) -> Iterator[Inverse]:
 
 def _verbose(ctx: Context) -> Iterator[Inverse]:
     yield ctx.get(CLI).add(VERBOSITY)
-    yield ctx.inject([ARGS, HTTP, STDERR], _verbose_observe, name="verbose output").retire
+    yield ctx.while_provided([ARGS, HTTP, STDERR], _verbose_observe, name="verbose output").retire
 
 # Shows every exchange the HTTP client makes, when -v is given, without whatever makes the requests knowing it is
 # there. It observes rather than wraps: observing is a registration of its own, so it needs no place in any order,

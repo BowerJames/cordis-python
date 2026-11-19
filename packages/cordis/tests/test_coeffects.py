@@ -48,14 +48,14 @@ async def test_reading_a_declared_key_that_is_not_committed_is_refused(runtime: 
     with pytest.raises(InactiveAccess, match="waiting requires number"):
         fiber.ctx.get(NUMBER)
 
-async def test_find_probes_without_committing(runtime: Runtime) -> None:
-    assert runtime.root.find(NUMBER) is None
+async def test_lookup_probes_without_committing(runtime: Runtime) -> None:
+    assert runtime.lookup(NUMBER) is None
     fiber = runtime.root.use(provider(7))
-    assert runtime.root.find(NUMBER) is None  # not yet active, so not yet provided
+    assert runtime.lookup(NUMBER) is None  # not yet active, so not yet provided
     await runtime.settled()
-    assert runtime.root.find(NUMBER) == 7
+    assert runtime.lookup(NUMBER) == 7
     await fiber.dispose()
-    assert runtime.root.find(NUMBER) is None
+    assert runtime.lookup(NUMBER) is None
 
 async def test_a_key_outside_the_provision_cannot_be_provided(runtime: Runtime, failures: object) -> None:
     def apply(ctx: Context) -> Inverse:
@@ -88,7 +88,7 @@ async def test_a_provider_may_be_replaced_once_the_old_one_has_left(runtime: Run
     await first.dispose()
     runtime.root.use(provider(2, name="second"))
     await runtime.settled()
-    assert runtime.root.find(NUMBER) == 2
+    assert runtime.lookup(NUMBER) == 2
 
 async def test_a_component_cannot_both_require_and_provide_a_key() -> None:
     with pytest.raises(ValueError, match="both requires and provides number"):
@@ -105,5 +105,5 @@ async def test_keys_with_the_same_name_are_different_keys(runtime: Runtime) -> N
     runtime.root.use(provider(1))
     runtime.root.use(provider(2, name="namesake", key=namesake))
     await runtime.settled()
-    assert runtime.root.find(NUMBER) == 1
-    assert runtime.root.find(namesake) == 2
+    assert runtime.lookup(NUMBER) == 1
+    assert runtime.lookup(namesake) == 2

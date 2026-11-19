@@ -29,7 +29,7 @@ async def test_a_failing_activation_installs_nothing(runtime: Runtime, failures:
     assert state(fiber) is FiberState.FAILED
     assert world == []
     assert fiber.table == {}
-    assert runtime.root.find(NUMBER) is None
+    assert runtime.lookup(NUMBER) is None
     assert failures.reported == [("server", "port already bound")]
 
 async def test_a_failure_stays_on_its_fiber(runtime: Runtime) -> None:
@@ -43,7 +43,7 @@ async def test_a_failure_stays_on_its_fiber(runtime: Runtime) -> None:
     fiber = runtime.root.use(Component("parent", apply=parent))
     await runtime.settled()
     assert state(fiber) is FiberState.ACTIVE
-    assert runtime.root.find(NUMBER) == 1
+    assert runtime.lookup(NUMBER) == 1
     assert {child.name: child.state for child in runtime.children(fiber)} == {
         "child": FiberState.FAILED,
         "provider": FiberState.ACTIVE,

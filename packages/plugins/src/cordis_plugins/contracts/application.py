@@ -25,8 +25,9 @@ class Application:
     when_started: Callable[[Callable[[], None]], Undo]
     started: Callable[[], Awaitable[bool]]
     end: Callable[[int], None]
-    # Reports a failure where it happened: to the handler containing fiber, if any, or else to the application.
-    fail: Callable[[Exception, str, Fiber | None], None]
+    # Records a failure of the application's, said to have happened where: it ends the application with status 1. A
+    # component whose own work failed says so with ctx.fail instead, which a containing handler takes when there is one.
+    fail: Callable[[Exception, str], None]
     contain: Callable[[Fiber, Callable[[Exception, str], None]], Undo]
 
 APPLICATION: Key[Application] = Key("application")

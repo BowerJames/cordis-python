@@ -40,7 +40,7 @@ async def provided[T](key: Key[T], component: Component[Any]) -> AsyncIterator[T
     async with open_runtime() as runtime:
         runtime.root.use(component)
         await runtime.settled()
-        value = runtime.root.find(key)
+        value = runtime.lookup(key)
         if value is None:
             raise LookupError(f"{component.name} provides nothing at {key.name}")
         yield value

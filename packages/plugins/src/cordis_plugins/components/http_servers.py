@@ -220,9 +220,7 @@ async def answer(table: RouteTable, request: ServerRequest, ctx: Context) -> Ser
         return await found.route.handle(ServerRequest(method=request.method, path=request.path, query=request.query,
                                                       headers=request.headers, body=request.body, params=found.params))
     except Exception as error:  # noqa: BLE001 - a failing handler fails its own request, never the server
-        report = ctx.find(STDERR)
-        if report is not None:
-            report(f"{found.route} failed: {error!r}\n")
+        ctx.get(STDERR)(f"{found.route} failed: {error!r}\n")
         return _plain(HTTPStatus.INTERNAL_SERVER_ERROR)
 
 # --- asyncio ------------------------------------------------------------------------------------------------------
@@ -327,7 +325,7 @@ async def _asyncio_http_server(ctx: Context, config: HttpServerConfig) -> AsyncI
 # The gateway form: binding and accepting is one step, and its inverse stops accepting, lets the requests in progress
 # finish for up to grace seconds, cancels what is left, and closes. Nothing runs beside it.
 asyncio_http_server = Component("asyncio http server", _asyncio_http_server, config=HttpServerConfig,
-                                requires=(ROUTES, GET_ENV), provides=(SERVER_ADDRESS,))
+                                requires=(ROUTES, GET_ENV, STDERR), provides=(SERVER_ADDRESS,))
 
 # --- FastAPI ------------------------------------------------------------------------------------------------------
 
@@ -414,9 +412,7 @@ def _app(table: RouteTable, max_body: int, ctx: Context) -> FastAPI:
         try:
             await route.handle(connected)
         except Exception as error:  # noqa: BLE001 - a failing handler fails its own connection, never the server
-            report = ctx.find(STDERR)
-            if report is not None:
-                report(f"{route} failed: {error!r}\n")
+            ctx.get(STDERR)(f"{route} failed: {error!r}\n")
             await close(1011, "internal error")
             return
         await close(1000, "")
@@ -465,4 +461,4 @@ def _fastapi_http_server(ctx: Context, config: HttpServerConfig) -> Iterator[Inv
 # inverse stops accepting, lets requests in progress finish for up to grace seconds, and then cancels. It takes the
 # same configuration as the asyncio server, so either stands in for the other.
 fastapi_http_server = Component("fastapi http server", _fastapi_http_server, config=HttpServerConfig,
-                                requires=(ROUTES, GET_ENV), provides=(SERVER_ADDRESS,))
+                                requires=(ROUTES, GET_ENV, STDERR), provides=(SERVER_ADDRESS,))

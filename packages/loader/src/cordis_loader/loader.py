@@ -3,6 +3,7 @@ from typing import Any, Callable, Collection, Iterator, Sequence
 from cordis import Component, Context, Fiber, FiberState, Inverse, Key, Metadata, Realm, RealmId
 from cordis.describe import Declared
 from cordis.describe import describe as describe_declared
+from cordis.orchestration import fiber_of, layered, realm_of
 
 from .entry import Entry, import_component
 from .hmr import Imports, RestartRequired, classify, invalidate, restore, stale
@@ -28,7 +29,8 @@ class _Node:
         return self.fiber is not None and not self.fiber.removed
 
 def _effectful(ctx: Context) -> bool:
-    return ctx.fiber.state in (FiberState.LOADING, FiberState.ACTIVE) and not ctx.fiber.removed
+    fiber = fiber_of(ctx)
+    return fiber.state in (FiberState.LOADING, FiberState.ACTIVE) and not fiber.removed
 
 def describe(entries: Sequence[Entry]) -> str:
     # How entries fit together, from a runtime made only to hold the description: nothing is loaded or run.
@@ -81,7 +83,7 @@ class Loader:
                 keys = (*component.requires, *component.provides)
                 nodes.append(Declared(
                     entry.id, tuple(component.requires), tuple(component.provides),
-                    {key: here.get(key, base.realm(key)) for key in keys}, parent, inactive=disabled,
+                    {key: here.get(key, realm_of(base, key)) for key in keys}, parent, inactive=disabled,
                     state="disabled" if entry.disabled else component.name,
                 ))
 
@@ -184,7 +186,7 @@ class Loader:
         for key, mode in entry.isolate.items():
             ctx = ctx.isolate(key, self._realm(entry, key, mode))
         component, config = self._component(node)
-        node.fiber = ctx.layered(node.intercepts).use(component, config)
+        node.fiber = layered(ctx, node.intercepts).use(component, config)
         # The loader orchestrates beneath its parent's context, with no effect function to yield from: the parent
         # adopts each child's retire, and disabling an entry applies it early.
         parent.ctx.adopt(node.fiber.retire)

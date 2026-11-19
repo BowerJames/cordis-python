@@ -180,4 +180,4 @@ async def test_a_failed_fiber_is_retried_with_its_new_configuration(runtime: Run
     assert fiber.state is FiberState.FAILED
     revised = await fiber.update(Greeting("fine"))
     await runtime.settled()
-    assert revised.state is FiberState.ACTIVE and runtime.root.find(GREETING) == "fine"
+    assert revised.state is FiberState.ACTIVE and runtime.lookup(GREETING) == "fine"

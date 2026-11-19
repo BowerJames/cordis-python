@@ -23,7 +23,7 @@ def configuration(lines: list[str], greeting: str = "hello", counting: bool = Tr
     ]
 
 async def say(runtime: Runtime, user: str, text: str) -> None:
-    channel = runtime.root.find(CHANNEL)
+    channel = runtime.lookup(CHANNEL)
     assert channel is not None, "the channel is not running"
     await channel.receive(user, text)
 
