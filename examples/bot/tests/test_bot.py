@@ -12,7 +12,7 @@ async def test_the_bot_follows_its_configuration_while_it_runs() -> None:
         "bot: hello, ada",
         "ada: count",
         "bot: ada, that is message 2",
-        # The counter is disabled and the greeter revised: only what the change reaches reloads.
+        # The counter is disabled, and the greeter takes its new greeting without reloading.
         "bot: no longer counting",
         "grace: hi",
         "bot: hey, grace",
@@ -23,6 +23,18 @@ async def test_the_bot_follows_its_configuration_while_it_runs() -> None:
         "bot: grace, that is message 1",
         "bot: no longer counting",
     ]
+
+async def test_a_new_greeting_keeps_the_greeter_it_is_given_to(runtime: Runtime) -> None:
+    lines: list[str] = []
+    loader = Loader(runtime.root)
+    await loader.load(configuration(lines))
+    await runtime.settled()
+    greeter = loader.fiber("features", "greeter")
+    await loader.load(configuration(lines, greeting="hey"))
+    await runtime.settled()
+    assert loader.fiber("features", "greeter") is greeter
+    await say(runtime, "ada", "hi")
+    assert lines[-1] == "bot: hey, ada"
 
 async def test_the_bot_describes_itself_without_starting(runtime: Runtime) -> None:
     lines: list[str] = []

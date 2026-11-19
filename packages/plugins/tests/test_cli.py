@@ -21,7 +21,7 @@ TIMES = option("times", ("-n", "--times"), "how many times", int, default=1)
 TAGS = repeated("tag", ("-t", "--tag"), "a tag", str)
 LOUD = switch("loud", ("--loud",), "shout")
 
-def greeter(seen: list[Any]) -> Component:
+def greeter(seen: list[Any]) -> Component[None]:
     # Registers its arguments as it loads, and reads them in a child that waits for them to be parsed.
     def read(ctx: Context) -> None:
         args = ctx.get(ARGS)
@@ -41,7 +41,7 @@ async def parse(argv: list[str], seen: list[Any]) -> tuple[int, str, str, bool]:
     outcome = await run_application([
         Entry("stdio", capture),
         Entry("cli", argparse_cli, config={"argv": argv, "prog": "greet"}),
-        Entry("greeter", greeter, config={"seen": seen}),
+        Entry("greeter", greeter(seen=seen)),
     ], signals=False)
     return outcome.status, captured.stdout, captured.stderr, bool(outcome.failed_with(UsageError))
 
@@ -72,5 +72,5 @@ async def test_a_command_line_that_does_not_match_prints_the_usage_and_ends_with
 async def test_a_component_that_is_not_loaded_has_no_arguments() -> None:
     capture, captured = capturing_stdio()
     await run_application([Entry("stdio", capture), Entry("cli", argparse_cli, config={"argv": ["--help"], "prog": "x"}),
-                           Entry("greeter", greeter, config={"seen": []}, disabled=True)], signals=False)
+                           Entry("greeter", greeter(seen=[]), disabled=True)], signals=False)
     assert "name" not in captured.stdout

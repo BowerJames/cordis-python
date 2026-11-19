@@ -5,12 +5,12 @@ from .helpers import state
 STORAGE: Key[str] = Key("storage")
 FILES: Key[str] = Key("files")
 
-def storage(path: str) -> Component:
+def storage(path: str) -> Component[None]:
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(STORAGE, path)
     return Component(f"storage {path}", apply=apply, provides=(STORAGE,))
 
-def bot(name: str, seen: list[str]) -> Component:
+def bot(name: str, seen: list[str]) -> Component[None]:
     return Component(name, apply=lambda ctx: seen.append(f"{name} uses {ctx.get(STORAGE)}"), requires=(STORAGE,))
 
 

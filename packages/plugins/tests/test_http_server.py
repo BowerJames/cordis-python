@@ -34,7 +34,7 @@ async def greet(request: ServerRequest) -> ServerResponse:
 async def broken(request: ServerRequest) -> ServerResponse:
     raise RuntimeError("handler broke")
 
-def routes(added: list[Route]) -> Component:
+def routes(added: list[Route]) -> Component[None]:
     def apply(ctx: Context) -> Iterator[Inverse]:
         for route in added:
             yield ctx.get(ROUTES).add(route)
@@ -46,7 +46,7 @@ def server(request: pytest.FixtureRequest) -> Any:
 
 def composition(server: Any, *extra: Entry, max_body: int = 1_048_576) -> list[Entry]:
     capture, _ = capturing_stdio()
-    return [Entry("stdio", capture), Entry("env", lambda: environment({})), Entry("routes", route_table),
+    return [Entry("stdio", capture), Entry("env", environment), Entry("routes", route_table),
             Entry("server", server, config={"port": 0, "max_body": max_body}), Entry("http", httpx_http), *extra]
 
 async def test_routes_are_answered_and_the_rest_is_404_or_405(server: Any) -> None:
@@ -58,7 +58,7 @@ async def test_routes_are_answered_and_the_rest_is_404_or_405(server: Any) -> No
         refused = await http.send(Request("DELETE", f"{base}/greet/ada"))
         assert (refused.status, refused.header("allow")) == (405, "GET")
 
-    outcome = await run_scenario(composition(server, Entry("app", routes, config={"added": [Route("GET", "/greet/{name}", greet)]})),
+    outcome = await run_scenario(composition(server, Entry("app", routes(added=[Route("GET", "/greet/{name}", greet)]))),
                                  steps, requires=(HTTP, SERVER_ADDRESS))
     assert outcome.failures == ()
 
@@ -70,8 +70,8 @@ async def test_a_handler_that_raises_fails_its_own_request_alone_and_is_reported
         assert (await http.send(Request("GET", f"{base}/broken"))).status == 500
         assert (await http.send(Request("GET", f"{base}/greet/ada"))).status == 200
 
-    entries = patched(composition(server, Entry("app", routes, config={"added": [Route("GET", "/broken", broken),
-                                                                              Route("GET", "/greet/{name}", greet)]})),
+    entries = patched(composition(server, Entry("app", routes(added=[Route("GET", "/broken", broken),
+                                                                              Route("GET", "/greet/{name}", greet)]))),
                       Entry("stdio", capture))
     outcome = await run_scenario(entries, steps, requires=(HTTP, SERVER_ADDRESS, STDERR))
     assert outcome.failures == ()
@@ -85,7 +85,7 @@ async def test_a_body_over_the_limit_is_413(server: Any) -> None:
     async def echo(request: ServerRequest) -> ServerResponse:
         return ServerResponse(200, body=request.body)
 
-    outcome = await run_scenario(composition(server, Entry("app", routes, config={"added": [Route("POST", "/echo", echo)]}),
+    outcome = await run_scenario(composition(server, Entry("app", routes(added=[Route("POST", "/echo", echo)])),
                                              max_body=10), steps, requires=(HTTP, SERVER_ADDRESS))
     assert outcome.failures == ()
 
@@ -99,7 +99,7 @@ async def test_a_route_withdrawn_while_the_server_runs_is_404_from_the_next_requ
         await contributor.dispose()
         assert (await http.send(Request("GET", f"{base}/greet/ada"))).status == 404
 
-    outcome = await run_scenario(composition(server, Entry("app", routes, config={"added": [Route("GET", "/greet/{name}", greet)]})),
+    outcome = await run_scenario(composition(server, Entry("app", routes(added=[Route("GET", "/greet/{name}", greet)]))),
                                  steps, requires=(HTTP, SERVER_ADDRESS))
     assert outcome.failures == ()
 
@@ -119,12 +119,12 @@ async def test_swapping_the_server_leaves_every_route_where_it_is() -> None:
         assert not contributor.removed
         await loader.load([])
 
-    entries = [Entry("env", lambda: environment({})), Entry("routes", route_table), Entry("http", httpx_http),
-               Entry("app", routes, config={"added": [Route("GET", "/greet/{name}", greet)]})]
+    entries = [Entry("env", environment), Entry("routes", route_table), Entry("http", httpx_http),
+               Entry("app", routes(added=[Route("GET", "/greet/{name}", greet)]))]
     outcome = await run_scenario(entries, steps, requires=(HTTP,))
     assert outcome.failures == ()
 
-@pytest.fixture(params=[route_table], ids=lambda keeper: keeper.__name__)
+@pytest.fixture(params=[route_table], ids=lambda keeper: keeper.name)
 async def table(request: pytest.FixtureRequest) -> AsyncIterator[RouteTable]:
     # The route table contract, run against every component keeping it, through the contract alone.
     async with provided(ROUTES, request.param) as kept:

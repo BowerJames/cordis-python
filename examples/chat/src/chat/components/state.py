@@ -20,9 +20,9 @@ class _Values:
     def set[V](self, key: StateKey[V], value: V, /) -> None:
         self._values[key] = value
 
-def session_state() -> Component:
-    # A fresh state each time it loads, once per session, for tools to keep what they learn between executions.
-    def apply(ctx: Context) -> Inverse:
-        values = _Values()
-        return ctx.provide(SESSION_STATE, SessionState(get=values.get, set=values.set))
-    return Component("session state", apply=apply, provides=(SESSION_STATE,))
+def _session_state(ctx: Context) -> Inverse:
+    values = _Values()
+    return ctx.provide(SESSION_STATE, SessionState(get=values.get, set=values.set))
+
+# A fresh state each time it loads, once per session, for tools to keep what they learn between executions.
+session_state = Component("session state", _session_state, provides=(SESSION_STATE,))

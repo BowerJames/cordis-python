@@ -156,7 +156,7 @@ async def test_verbose_appears_in_help() -> None:
 def test_curl_itself_knows_nothing_of_verbose() -> None:
     # curl requires the command line alone; its fetch, a child, requires what the request needs. Nothing in either
     # names verbose, which only observes the HTTP client.
-    assert {key.name for key in curl_component().requires} == {"cli"}
+    assert {key.name for key in curl_component.requires} == {"cli"}
 
 
 # -m/--max-time, and ending promptly
@@ -174,7 +174,7 @@ async def test_max_time_must_be_a_positive_number_of_seconds(given: str) -> None
     assert f"invalid seconds value: '{given}'" in captured.stderr
     assert sent == []
 
-def never_answers() -> Component:
+def never_answers() -> Component[None]:
     async def request(made: Request) -> Response:
         await asyncio.Event().wait()
         raise AssertionError("never answered")
@@ -185,7 +185,7 @@ def never_answers() -> Component:
 
 async def test_ctrl_c_gives_up_the_request_at_once_and_exits_130(capsys: pytest.CaptureFixture[str]) -> None:
     capture, captured = capturing_stdio()
-    entries = patched(compose(["https://example.com"]), Entry("http", never_answers), Entry("stdio", capture))
+    entries = patched(compose(["https://example.com"]), Entry("http", never_answers()), Entry("stdio", capture))
     loop = asyncio.get_running_loop()
     loop.call_later(0.05, os.kill, os.getpid(), signal.SIGINT)
     started = loop.time()

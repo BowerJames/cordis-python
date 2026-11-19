@@ -9,7 +9,7 @@ from cordis_plugins.testing import provided
 
 PINGS: Topic[str] = Topic("pings")
 
-@pytest.fixture(params=[event_bus], ids=lambda keeper: keeper.__name__)
+@pytest.fixture(params=[event_bus], ids=lambda keeper: keeper.name)
 async def events(request: pytest.FixtureRequest) -> AsyncIterator[Events]:
     async with provided(EVENTS, request.param) as kept:
         yield kept

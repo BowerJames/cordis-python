@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Iterator
+from typing import Iterator
 
 import pytest
 
@@ -10,6 +10,7 @@ from cordis_plugins import (
     STDOUT,
     STDOUT_IS_TERMINAL,
     TIMER,
+    EnvironmentConfig,
     capturing_stdio,
     environment,
     get_env_os,
@@ -19,7 +20,7 @@ from cordis_plugins import (
 
 
 async def test_stdio_writes_to_whatever_sys_stdout_is_when_written(runtime: Runtime, capsys: pytest.CaptureFixture[str]) -> None:
-    runtime.root.use(stdio())
+    runtime.root.use(stdio)
     await runtime.settled()
     write = runtime.root.find(STDOUT)
     assert write is not None
@@ -28,7 +29,7 @@ async def test_stdio_writes_to_whatever_sys_stdout_is_when_written(runtime: Runt
 
 async def test_capturing_stdio_keeps_what_is_written_and_says_terminal_as_told(runtime: Runtime) -> None:
     capture, captured = capturing_stdio(terminal=True)
-    runtime.root.use(capture())
+    runtime.root.use(capture)
     await runtime.settled()
     for key, text in ((STDOUT, "out"), (STDERR, "err")):
         write = runtime.root.find(key)
@@ -39,12 +40,12 @@ async def test_capturing_stdio_keeps_what_is_written_and_says_terminal_as_told(r
 
 async def test_the_environment_is_the_process_or_what_is_given(runtime: Runtime, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CORDIS_TEST_VARIABLE", "set")
-    process = runtime.root.use(get_env_os())
+    process = runtime.root.use(get_env_os)
     await runtime.settled()
     get_env = runtime.root.find(GET_ENV)
     assert get_env is not None and get_env("CORDIS_TEST_VARIABLE") == "set"
     await process.dispose()
-    runtime.root.use(environment({"ONLY": "this"}))
+    runtime.root.use(environment, EnvironmentConfig({"ONLY": "this"}))
     await runtime.settled()
     given = runtime.root.find(GET_ENV)
     assert given is not None and (given("ONLY"), given("CORDIS_TEST_VARIABLE")) == ("this", None)
@@ -52,9 +53,9 @@ async def test_the_environment_is_the_process_or_what_is_given(runtime: Runtime,
 # The timer contract, run against every component keeping it.
 TIMERS = [timer]
 
-@pytest.mark.parametrize("keeper", TIMERS, ids=lambda keeper: keeper.__name__)
+@pytest.mark.parametrize("keeper", TIMERS, ids=lambda keeper: keeper.name)
 async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(
-    runtime: Runtime, keeper: Callable[[], Component],
+    runtime: Runtime, keeper: Component[None],
 ) -> None:
     fired: list[str] = []
 
@@ -62,7 +63,7 @@ async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(
         yield ctx.get(TIMER).after(0.01, lambda: fired.append("late"))
         yield ctx.get(TIMER).after(0, lambda: fired.append("soon"))
 
-    runtime.root.use(keeper())
+    runtime.root.use(keeper)
     fiber = runtime.root.use(Component("waiter", apply=apply, requires=(TIMER,)))
     await runtime.settled()
     await asyncio.sleep(0.001)
@@ -70,10 +71,10 @@ async def test_a_timer_set_as_an_effect_never_fires_after_its_fiber_unloads(
     await asyncio.sleep(0.02)
     assert fired == ["soon"]
 
-@pytest.mark.parametrize("keeper", TIMERS, ids=lambda keeper: keeper.__name__)
-async def test_an_interval_repeats_until_cancelled(runtime: Runtime, keeper: Callable[[], Component]) -> None:
+@pytest.mark.parametrize("keeper", TIMERS, ids=lambda keeper: keeper.name)
+async def test_an_interval_repeats_until_cancelled(runtime: Runtime, keeper: Component[None]) -> None:
     ticks: list[int] = []
-    runtime.root.use(keeper())
+    runtime.root.use(keeper)
     await runtime.settled()
     timers = runtime.root.find(TIMER)
     assert timers is not None

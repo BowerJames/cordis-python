@@ -6,11 +6,11 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Iterator, Mapping
 
 import pytest
 
-from chat.components import workspace
+from chat.components import ChatConfig, workspace
 from chat.contracts import PROVIDERS, AssistantMessage, Model, Note, Provider, ToolCall, Turn
 from chat.entrypoints import tui
-from chat.entrypoints.server import compose, with_a_session
-from cordis import Component, Context, Inverse
+from chat.entrypoints.server import compose, session, with_a_session
+from cordis import Component, Context, Inverse, Runtime
 from cordis_loader import Entry, patched, without
 from cordis_plugins import (
     APPLICATION,
@@ -65,7 +65,7 @@ class Client:
 
 type Connect = Callable[[Mapping[str, str]], Client]
 
-def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Component:
+def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Component[None]:
     # Stands in for the HTTP server without a socket: hands /ws/chat connections made in memory to the socket route in
     # the table, runs the conversation once the application has started, then ends the application and, like a real
     # server, lets its connections finish as it is told to stop.
@@ -91,7 +91,7 @@ def memory_server(conversation: Callable[[Connect], Awaitable[None]]) -> Compone
 
     return Component("memory server", apply=apply, requires=(APPLICATION, ROUTES), provides=(SERVER_ADDRESS,))
 
-def scripted(replies: list[AssistantMessage], turns: list[Turn]) -> Component:
+def scripted(replies: list[AssistantMessage], turns: list[Turn]) -> Component[None]:
     # A provider for tests: one more provider on offer, added as an entry of its own without touching anything else.
     @asynccontextmanager
     async def connect(model_name: str) -> AsyncIterator[Model]:
@@ -107,17 +107,17 @@ def scripted(replies: list[AssistantMessage], turns: list[Turn]) -> Component:
 
 async def composed(conversation: Callable[[Connect], Awaitable[None]], root: Path,
                    replies: list[AssistantMessage] | None = None, turns: list[Turn] | None = None,
-                   env: Mapping[str, str] = {}, stdio: Callable[[], Component] | None = None,
+                   env: Mapping[str, str] = {}, stdio: Component[None] | None = None,
                    entries: list[Entry] | None = None) -> int:
     # The real chat server, with memory in place of the network, the terminal, the environment and the models: each
     # swapped by its entry.
     outcome = await run_application(patched(
         entries if entries is not None else compose(),
         Entry("stdio", stdio or capturing_stdio()[0]),
-        Entry("env", lambda: environment(env)),
-        Entry("server", lambda: memory_server(conversation)),
-        Entry("workspace", lambda: workspace(root)),
-        Entry("scripted", lambda: scripted(replies if replies is not None else [], turns if turns is not None else [])),
+        Entry("env", environment, config={"variables": env}),
+        Entry("server", memory_server(conversation)),
+        Entry("workspace", workspace, config={"root": root}),
+        Entry("scripted", scripted(replies if replies is not None else [], turns if turns is not None else [])),
     ), signals=False)
     assert outcome.failures == (), outcome.failures
     return outcome.status
@@ -145,7 +145,7 @@ def test_describe_shows_what_loads_in_each_session_and_what_is_on_offer() -> Non
 
 def test_chat_needs_no_session_log_and_the_terminal_client_goes_without_one() -> None:
     from chat.components import chat
-    assert "session_log" not in {key.name for key in chat(session=[]).requires}
+    assert "session_log" not in {key.name for key in chat.requires}
     described = describe(tui.compose())
     assert "tui" in described and "session-log" not in described
 
@@ -233,6 +233,30 @@ async def test_each_session_has_state_of_its_own(root: Path) -> None:
     await composed(conversation, root, replies)
     assert notes == []
 
+
+async def test_a_new_session_template_reaches_the_sessions_already_open(root: Path) -> None:
+    # Chat takes a new template in place (Section 5.2.1): the route stays, so the connection does, and the live session
+    # is reconciled to the template as a group is, losing the one tool the template no longer has.
+    turns: list[Turn] = []
+    replies = [AssistantMessage("first"), AssistantMessage("second")]
+    runtimes: list[Runtime] = []
+    kept: list[bool] = []
+
+    async def conversation(connect: Connect) -> None:
+        client = connect(SCRIPTED)
+        await client.say("one")
+        await client.until("done")
+        (fiber,) = [fiber for fiber in runtimes[0].fibers() if fiber.name == "chat"]
+        kept.append(await fiber.update(ChatConfig(session=without(session(), "grep"))) is fiber)
+        await client.say("two")
+        await client.until("done")
+        kept.append(client.closed is None)
+        await client.leave()
+
+    probe = Component("probe", lambda ctx: runtimes.append(ctx.runtime))
+    await composed(conversation, root, replies, turns, entries=[*compose(), Entry("probe", probe)])
+    assert kept == [True, True]
+    assert [[tool.name for tool in turn.tools] for turn in turns] == [["listDir", "grep", "read"], ["listDir", "read"]]
 
 async def test_an_agent_type_only_has_its_own_tools(root: Path) -> None:
     replies = [calling("1", "grep", pattern="hello"), AssistantMessage("I cannot search")]
@@ -390,7 +414,7 @@ async def test_ending_the_server_ends_open_sessions_first(root: Path) -> None:
 
 def real(root: Path, replies: list[AssistantMessage], client: Callable[[Context], Awaitable[None]]) -> list[Entry]:
     # The real chat server on a free port, with a client component talking to it once the application has started.
-    def talking() -> Component:
+    def talking() -> Component[None]:
         def apply(ctx: Context) -> Inverse:
             async def talk(stopping: asyncio.Event) -> None:
                 if not await ctx.get(APPLICATION).started():
@@ -402,9 +426,9 @@ def real(root: Path, replies: list[AssistantMessage], client: Callable[[Context]
             return background(ctx, "client", talk)
         return Component("client", apply=apply, requires=(APPLICATION, SERVER_ADDRESS))
 
-    return patched(compose(port=0), Entry("stdio", capturing_stdio()[0]), Entry("env", lambda: environment({})),
-                   Entry("workspace", lambda: workspace(root)), Entry("scripted", lambda: scripted(replies, [])),
-                   Entry("client", talking))
+    return patched(compose(port=0), Entry("stdio", capturing_stdio()[0]), Entry("env", environment),
+                   Entry("workspace", workspace, config={"root": root}), Entry("scripted", scripted(replies, [])),
+                   Entry("client", talking()))
 
 @pytest.mark.external
 async def test_a_real_websocket_session_against_the_real_server(root: Path) -> None:

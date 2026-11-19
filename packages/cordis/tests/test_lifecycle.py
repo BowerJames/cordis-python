@@ -8,14 +8,14 @@ from .helpers import state
 DATABASE: Key[dict[str, str]] = Key("database")
 CHAT: Key[str] = Key("chat")
 
-def database(log: list[str], value: dict[str, str] | None = None, name: str = "database") -> Component:
+def database(log: list[str], value: dict[str, str] | None = None, name: str = "database") -> Component[None]:
     def apply(ctx: Context) -> Iterator[Inverse]:
         log.append(f"{name} up")
         yield ctx.provide(DATABASE, value if value is not None else {"greeting": "hello"})
         yield lambda: log.append(f"{name} down")
     return Component(name, apply=apply, provides=(DATABASE,))
 
-def reader(log: list[str]) -> Component:
+def reader(log: list[str]) -> Component[None]:
     def apply(ctx: Context) -> Inverse:
         log.append(f"reader up: {ctx.get(DATABASE)['greeting']}")
         # Teardown reads the dependency whose departure caused it (Theorem 70).

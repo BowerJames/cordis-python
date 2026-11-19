@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from cordis import Component, Context, Inverse
 from cordis_plugins import EVENTS
 
@@ -16,9 +18,15 @@ class _Transcript:
     def say(self, text: str) -> None:
         self._lines.append(f"bot: {text}")
 
-def transcript_channel(lines: list[str]) -> Component:
-    # A channel that writes everything said into lines, in place of a real chat platform.
-    def apply(ctx: Context) -> Inverse:
-        transcript = _Transcript(ctx, lines)
-        return ctx.provide(CHANNEL, Channel(receive=transcript.receive, say=transcript.say))
-    return Component("transcript channel", apply=apply, requires=(EVENTS,), provides=(CHANNEL,))
+@dataclass(frozen=True, slots=True)
+class TranscriptConfig:
+    # Where everything said is written.
+    lines: list[str]
+
+def _transcript_channel(ctx: Context, config: TranscriptConfig) -> Inverse:
+    transcript = _Transcript(ctx, config.lines)
+    return ctx.provide(CHANNEL, Channel(receive=transcript.receive, say=transcript.say))
+
+# A channel that writes everything said into the configured lines, in place of a real chat platform.
+transcript_channel = Component("transcript channel", _transcript_channel, config=TranscriptConfig, requires=(EVENTS,),
+                               provides=(CHANNEL,))

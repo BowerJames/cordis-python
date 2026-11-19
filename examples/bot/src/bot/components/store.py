@@ -11,8 +11,8 @@ class _Memory:
         self._counts[name] = self._counts.get(name, 0) + 1
         return self._counts[name]
 
-def memory_store() -> Component:
-    def apply(ctx: Context) -> Inverse:
-        memory = _Memory()
-        return ctx.provide(STORE, Store(increment=memory.increment))
-    return Component("memory store", apply=apply, provides=(STORE,))
+def _memory_store(ctx: Context) -> Inverse:
+    memory = _Memory()
+    return ctx.provide(STORE, Store(increment=memory.increment))
+
+memory_store = Component("memory store", _memory_store, provides=(STORE,))

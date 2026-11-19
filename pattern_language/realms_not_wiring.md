@@ -8,7 +8,7 @@ summary: Two of something, such as a second server or a session per connection, 
 A key has one provider in a realm (O-Insert), and components find what they need by key rather than being handed it. Yet an application often runs more than one of something: an admin server beside the public one, a session for each connection, each with a connection, model and tools of its own.
 
 ## Problem
-Handing each instance the keys it should use brings back wiring: every factory grows a parameter for each key it touches, and the composition has to thread the same objects through all of them. Giving each repeated part a mechanism of its own puts in the kernel what composition can already say.
+Handing each instance the keys it should use brings back wiring: every component's configuration grows a field for each key it touches, and the composition has to thread the same objects through all of them. Giving each repeated part a mechanism of its own puts in the kernel what composition can already say.
 
 ## Forces
 - **One provider per realm:** A second provider of a key in the same realm is refused when it is inserted.

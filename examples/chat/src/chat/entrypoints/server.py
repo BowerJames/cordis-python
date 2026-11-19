@@ -78,7 +78,7 @@ def with_a_session(entries: list[Entry], sessions: list[Entry] | None = None) ->
     # ones as connections arrive.
     def opened(ctx: Context) -> None:
         pass
-    opening = Entry("opening", lambda: Component("session", apply=opened, provides=(CONNECTION, TOOLS)))
+    opening = Entry("opening", Component("session", apply=opened, provides=(CONNECTION, TOOLS)))
     return [*entries, Entry("each-session", children=[opening, *(sessions if sessions is not None else session())],
                             isolate={key: True for key in SESSION_KEYS})]
 

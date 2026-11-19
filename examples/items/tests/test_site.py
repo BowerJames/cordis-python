@@ -1,7 +1,7 @@
 import json
 import socket
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Iterator
 from urllib.parse import urlsplit
 
 import pytest
@@ -41,7 +41,7 @@ def free_port() -> int:
         port: int = probe.getsockname()[1]
         return port
 
-def probing_stdio(seen: dict[str, Any], captured: Captured) -> Callable[[], Component]:
+def probing_stdio(seen: dict[str, Any], captured: Captured) -> Component[None]:
     # Captures stdout, and at the moment discovery says it has deregistered, records whether the server still accepts.
     def write(text: str) -> None:
         if text.startswith("deregistered"):
@@ -53,15 +53,15 @@ def probing_stdio(seen: dict[str, Any], captured: Captured) -> Callable[[], Comp
         yield ctx.provide(STDERR, lambda text: None)
         yield ctx.provide(STDOUT_IS_TERMINAL, lambda: False)
         yield ctx.provide(STDERR_IS_TERMINAL, lambda: False)
-    return lambda: Component("probing stdio", apply=apply, provides=(STDOUT, STDERR, STDOUT_IS_TERMINAL, STDERR_IS_TERMINAL))
+    return Component("probing stdio", apply, provides=(STDOUT, STDERR, STDOUT_IS_TERMINAL, STDERR_IS_TERMINAL))
 
 async def site(argv: list[str], steps: Steps | None = None, database: Path | None = None,
-               stdio: Callable[[], Component] | None = None) -> tuple[int, Captured]:
+               stdio: Component[None] | None = None) -> tuple[int, Captured]:
     capture, captured = capturing_stdio()
     entries = patched(compose(argv, database=database), Entry("stdio", stdio or capture))
     if steps is not None:
         entries = patched(entries, Entry("http", httpx_http),
-                          Entry("scenario", lambda: scenario(steps, requires=(HTTP, SERVER_ADDRESS))))
+                          Entry("scenario", scenario(steps, requires=(HTTP, SERVER_ADDRESS))))
     return await run(entries), captured
 
 

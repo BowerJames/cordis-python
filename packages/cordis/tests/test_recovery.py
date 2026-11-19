@@ -10,12 +10,12 @@ from .helpers import state
 LISTENERS: Key[Entries[str]] = Key("listeners")
 NUMBER: Key[int] = Key("number")
 
-def registry(entries: Entries[str]) -> Component:
+def registry(entries: Entries[str]) -> Component[None]:
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(LISTENERS, entries)
     return Component("registry", apply=apply, provides=(LISTENERS,))
 
-def listener(name: str, *values: str) -> Component:
+def listener(name: str, *values: str) -> Component[None]:
     # Each registration returns the inverse that removes its own entry and no other, and the listener yields it.
     def apply(ctx: Context) -> Iterator[Inverse]:
         for value in values:

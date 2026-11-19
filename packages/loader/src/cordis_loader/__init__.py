@@ -1,11 +1,10 @@
-from .entry import ComponentFactory, ComponentRef, Entry, entries_from, import_factory, patched, without
+from .entry import ComponentRef, Entry, entries_from, import_component, patched, without
 from .hmr import Imports, RestartRequired, classify, source_imports
 from .loader import Loader, Resolve, describe
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "ComponentFactory",
     "ComponentRef",
     "Entry",
     "Imports",
@@ -15,7 +14,7 @@ __all__ = [
     "classify",
     "describe",
     "entries_from",
-    "import_factory",
+    "import_component",
     "patched",
     "source_imports",
     "without",

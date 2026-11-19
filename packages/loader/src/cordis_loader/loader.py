@@ -4,10 +4,10 @@ from cordis import Component, Context, Fiber, FiberState, Inverse, Key, Metadata
 from cordis.describe import Declared
 from cordis.describe import describe as describe_declared
 
-from .entry import ComponentFactory, Entry, import_factory
+from .entry import Entry, import_component
 from .hmr import Imports, RestartRequired, classify, invalidate, restore, stale
 
-type Resolve = Callable[[str], ComponentFactory]
+type Resolve = Callable[[str], Component[Any]]
 
 class _Node:
     # One entry and the fiber that realizes it. The entry is the identity that survives revision; each fiber is the
@@ -39,7 +39,7 @@ class Loader:
     # Keeps a tree of entries and the fibers realizing it in step (Section 5.2.1). The configuration is the authority:
     # the running system is changed only by giving the loader a new one, which it reconciles incrementally, and by
     # confluence (Theorem 80) the system then quiesces where loading the new configuration from scratch would have.
-    def __init__(self, ctx: Context, resolve: Resolve = import_factory) -> None:
+    def __init__(self, ctx: Context, resolve: Resolve = import_component) -> None:
         self._root = _Node(Entry(id="", children=()))
         self._root.ctx = ctx
         self._resolve = resolve
@@ -60,7 +60,7 @@ class Loader:
 
     def describe(self, entries: Sequence[Entry] | None = None) -> str:
         # How entries (the current ones unless given) fit together, without running anything: each entry's component
-        # is built, which binds its configuration, but never applied, so this reads declarations alone.
+        # is resolved and its configuration built, but never applied, so this reads declarations alone.
         base = self._root.ctx
         assert base is not None
         nodes: list[Declared] = []
@@ -77,7 +77,7 @@ class Loader:
                     nodes.append(group)
                     walk(entry.children, group, here, disabled)
                     continue
-                component = self._build(entry)
+                component, _ = self._build(entry)
                 keys = (*component.requires, *component.provides)
                 nodes.append(Declared(
                     entry.id, tuple(component.requires), tuple(component.provides),
@@ -154,18 +154,15 @@ class Loader:
         if entry.disabled:
             await self._disable(child)
             return
-        rebuild = (
-            old.component != entry.component
-            or old.config != entry.config
-            or old.isolate != entry.isolate
-            or old.is_group != entry.is_group
-        )
+        rebuild = old.component != entry.component or old.isolate != entry.isolate or old.is_group != entry.is_group
         if rebuild:
             await self._disable(child)
         # Interception is consulted at read time (Section 5.2.1), so it is updated in place and nothing reloads.
         if child.intercepts != entry.intercept:
             child.intercepts.clear()
             child.intercepts.update(entry.intercept)
+        if child.running and old.config != entry.config:
+            await self._reconfigure(child)
         if not child.running:
             self._instantiate(child, parent)
         elif entry.children is not None and child.ctx is not None:
@@ -186,28 +183,41 @@ class Loader:
         ctx = parent.ctx
         for key, mode in entry.isolate.items():
             ctx = ctx.isolate(key, self._realm(entry, key, mode))
-        node.fiber = ctx.layered(node.intercepts).use(self._component(node))
+        component, config = self._component(node)
+        node.fiber = ctx.layered(node.intercepts).use(component, config)
         # The loader orchestrates beneath its parent's context, with no effect function to yield from: the parent
         # adopts each child's retire, and disabling an entry applies it early.
         parent.ctx.adopt(node.fiber.retire)
 
-    def _component(self, node: _Node) -> Component:
+    async def _reconfigure(self, node: _Node) -> None:
+        # The entry's config alone changed: the new configuration is handed to the fiber, which takes it in place or
+        # is revised (Fiber.update). One that no longer builds is rebuilt, and fails on its fiber as it would on loading.
+        assert node.fiber is not None
+        component, config = self._build(node.entry)
+        if component is not node.fiber.component:
+            await self._disable(node)
+            return
+        node.fiber = await node.fiber.update(config)
+
+    def _component(self, node: _Node) -> tuple[Component[Any], Any]:
         if node.entry.children is not None:
-            return Component(node.entry.id, apply=lambda ctx: self._mount(node, ctx))
+            return Component(node.entry.id, lambda ctx: self._mount(node, ctx)), None
         return self._build(node.entry)
 
-    def _build(self, entry: Entry) -> Component:
+    def _build(self, entry: Entry) -> tuple[Component[Any], Any]:
+        # The entry's component and the configuration its config describes, built and checked by the component's
+        # schema. A bad entry fails on its own fiber, and its siblings still load.
         try:
-            factory = self._resolve(entry.component) if isinstance(entry.component, str) else entry.component
-            assert factory is not None
-            return factory(**entry.config)
-        except Exception as error:  # noqa: BLE001 - a bad entry fails on its own fiber, and its siblings still load
+            component = self._resolve(entry.component) if isinstance(entry.component, str) else entry.component
+            assert component is not None
+            return component, component.configure(entry.config)
+        except Exception as error:  # noqa: BLE001 - reported by the fiber it fails
             failure = error
 
             def fail(ctx: Context) -> None:
                 raise failure
 
-            return Component(entry.id, apply=fail)
+            return Component(entry.id, fail), None
 
     def _mount(self, node: _Node, ctx: Context) -> Inverse:
         # A group's effect function: instantiate a child per entry it currently holds, through the group's context.

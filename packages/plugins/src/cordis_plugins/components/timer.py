@@ -50,10 +50,10 @@ class _LoopTimer:
             handle.cancel()
         self._handles.clear()
 
-def timer() -> Component:
-    def apply(ctx: Context) -> Iterator[Inverse]:
-        timers = _LoopTimer()
-        # Whatever is still scheduled when the timer itself unloads is cancelled with it.
-        yield timers.cancel_all
-        yield ctx.provide(TIMER, Timer(after=timers.after, every=timers.every, pending=timers.pending))
-    return Component("timer", apply=apply, provides=(TIMER,))
+def _timer(ctx: Context) -> Iterator[Inverse]:
+    timers = _LoopTimer()
+    # Whatever is still scheduled when the timer itself unloads is cancelled with it.
+    yield timers.cancel_all
+    yield ctx.provide(TIMER, Timer(after=timers.after, every=timers.every, pending=timers.pending))
+
+timer = Component("timer", _timer, provides=(TIMER,))

@@ -76,7 +76,7 @@ def test_a_workspace_its_repository_ignores_is_hidden_with_everything_in_it(tmp_
 
 async def test_the_workspace_component_refuses_a_workspace_its_repository_ignores(tmp_path: Path) -> None:
     files(tmp_path, {".git/": "", ".gitignore": "workspace/\n", "workspace/app.py": ""})
-    outcome = await run_application([Entry("env", lambda: environment({})),
+    outcome = await run_application([Entry("env", environment),
                                      Entry("workspace", workspace, config={"root": tmp_path / "workspace"})], signals=False)
     [(_, error)] = outcome.failures
     assert isinstance(error, PermissionError)

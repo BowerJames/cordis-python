@@ -10,7 +10,7 @@ A: Key[str] = Key("a")
 B: Key[str] = Key("b")
 C: Key[str] = Key("c")
 
-def node(name: str, requires: tuple[Key[str], ...], provides: tuple[Key[str], ...], world: set[str]) -> Component:
+def node(name: str, requires: tuple[Key[str], ...], provides: tuple[Key[str], ...], world: set[str]) -> Component[None]:
     def apply(ctx: Context) -> Iterator[Inverse]:
         inputs = ",".join(ctx.get(key) for key in requires)
         for key in provides:
@@ -19,7 +19,7 @@ def node(name: str, requires: tuple[Key[str], ...], provides: tuple[Key[str], ..
         yield lambda: world.discard(name)
     return Component(name, apply=apply, requires=requires, provides=provides)
 
-def system(world: set[str]) -> list[Component]:
+def system(world: set[str]) -> list[Component[None]]:
     return [
         node("source", (), (A,), world),
         node("middle", (A,), (B,), world),

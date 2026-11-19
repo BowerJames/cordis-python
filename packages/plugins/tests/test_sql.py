@@ -44,7 +44,7 @@ def provider(request: pytest.FixtureRequest, tmp_path: Path) -> list[Entry]:
 
 async def using(provider: list[Entry], steps: Callable[[Sql], Awaitable[None]]) -> None:
     # Runs steps with the provider's Sql once the application has started; what goes wrong in them is raised as itself.
-    def talking() -> Component:
+    def talking() -> Component[None]:
         def apply(ctx: Context) -> Inverse:
             async def talk(stopping: asyncio.Event) -> None:
                 if not await ctx.get(APPLICATION).started():
@@ -56,7 +56,7 @@ async def using(provider: list[Entry], steps: Callable[[Sql], Awaitable[None]]) 
             return background(ctx, "talking", talk)
         return Component("talking", apply=apply, requires=(APPLICATION, SQL))
 
-    outcome = await run_application([*provider, Entry("talking", talking)], signals=False)
+    outcome = await run_application([*provider, Entry("talking", talking())], signals=False)
     if outcome.failures:
         raise outcome.failures[0][1]
 

@@ -1,20 +1,18 @@
 import importlib
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from cordis import Component, Key, Metadata
 
-# Builds the component an entry declares from the entry's config, given as keyword arguments. Configuration is bound
-# into the component's effect function here, so one factory given two configs makes two components (Section 4.4).
-type ComponentFactory = Callable[..., Component]
-# A factory, or where to import one from: "package.module:attribute".
-type ComponentRef = str | ComponentFactory
+# A component, or where to import one from: "package.module:attribute" (the url of Definition 81).
+type ComponentRef = str | Component[Any]
 
 @dataclass(slots=True, frozen=True)
 class Entry:
     # One fiber, declared (Definition 81). An entry names either a component or children, which it loads as a group.
     id: str
     component: ComponentRef | None = None
+    # Keyword arguments for the component's schema, which builds the configuration the fiber is instantiated with.
     config: Mapping[str, Any] = field(default_factory=dict)
     children: Sequence["Entry"] | None = None
     disabled: bool = False
@@ -37,12 +35,14 @@ class Entry:
     def is_group(self) -> bool:
         return self.children is not None
 
-def import_factory(ref: str) -> ComponentFactory:
+def import_component(ref: str) -> Component[Any]:
     module_name, _, attribute = ref.partition(":")
     if not attribute:
         raise ValueError(f"component reference {ref!r} names no attribute; write it as module:attribute")
-    factory: ComponentFactory = getattr(importlib.import_module(module_name), attribute)
-    return factory
+    component = getattr(importlib.import_module(module_name), attribute)
+    if not isinstance(component, Component):
+        raise TypeError(f"{ref} is {component!r}, not a component")
+    return component
 
 def entries_from(data: Sequence[Mapping[str, Any]], keys: Mapping[str, Key[Any]]) -> list[Entry]:
     # Entries from plain data, as JSON or YAML would give them. Keys are named, and each name must be one keys knows,

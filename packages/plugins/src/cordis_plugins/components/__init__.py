@@ -7,7 +7,7 @@ from .application import (
     run_application,
     with_application,
 )
-from .argparse_cli import argparse_cli
+from .argparse_cli import CliConfig, argparse_cli
 from .event_bus import event_bus
 from .http_clients import (
     DEFAULT_HTTP_TIMEOUT,
@@ -20,13 +20,13 @@ from .http_clients import (
     recording_http,
     respond,
 )
-from .http_servers import announce, asyncio_http_server, fastapi_http_server, health, route_table
+from .http_servers import HttpServerConfig, announce, asyncio_http_server, fastapi_http_server, health, route_table
 from .openai_sdk import openai_sdk
-from .postgres_pool import postgres_pool
+from .postgres_pool import PostgresPoolConfig, postgres_pool
 from .postgres_sql import postgres_sql
-from .sqlite_database import sqlite_database
+from .sqlite_database import SqliteDatabaseConfig, sqlite_database
 from .sqlite_sql import sqlite_sql
-from .stdio import Captured, capturing_stdio, environment, get_env_os, stdio
+from .stdio import Captured, EnvironmentConfig, capturing_stdio, environment, get_env_os, stdio
 from .timer import timer
 
 __all__ = [
@@ -36,7 +36,12 @@ __all__ = [
     "Answer",
     "ApplicationRun",
     "Captured",
+    "CliConfig",
+    "EnvironmentConfig",
+    "HttpServerConfig",
     "Outcome",
+    "PostgresPoolConfig",
+    "SqliteDatabaseConfig",
     "announce",
     "application",
     "argparse_cli",

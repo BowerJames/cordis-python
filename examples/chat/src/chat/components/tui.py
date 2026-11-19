@@ -1,6 +1,7 @@
 import asyncio
 import json
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any, ClassVar, Sequence
 from urllib.parse import urlencode
 
@@ -173,31 +174,39 @@ class ChatApp(App[None]):
                 self.show(Static(Text(json.dumps(event)), classes="info"))
 
 
-def tui(path: str = "/ws/chat", provider: str | None = None, model_name: str = "", agent_type: str | None = None) -> Component:
-    # A terminal client for the chat route, run once the application has started, offering the providers and agent
-    # types the server has. It talks to the server over a websocket like any other client; quitting it ends the
-    # application. It requires the server's address, so it closes before the server stops.
-    def apply(ctx: Context) -> Inverse:
-        async def run(stopping: asyncio.Event) -> None:
-            # Opened once everything has loaded, so every provider and agent type is on offer.
-            if not await ctx.get(APPLICATION).started():
-                return
-            address = ctx.get(SERVER_ADDRESS).replace("http://", "ws://", 1)
-            app = ChatApp(f"{address}{path}", providers=ctx.get(PROVIDERS).names(), agent_types=ctx.get(AGENT_TYPES).names(),
-                          provider=provider, model_name=model_name, agent_type=agent_type)
-            running = asyncio.ensure_future(app.run_async())
-            ending = asyncio.ensure_future(stopping.wait())
-            try:
-                await asyncio.wait({running, ending}, return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                ending.cancel()
-            if not running.done():
-                # The application is ending for some other reason, such as a signal: close the app, and give the
-                # terminal back.
-                app.exit()
-            await running
-            ctx.get(APPLICATION).end(0)
+@dataclass(frozen=True, slots=True)
+class TuiConfig:
+    # The route to connect to, and what to preselect: a provider, model and agent type not given are asked for.
+    path: str = "/ws/chat"
+    provider: str | None = None
+    model_name: str = ""
+    agent_type: str | None = None
 
-        return background(ctx, "terminal client", run)
+def _tui(ctx: Context, config: TuiConfig) -> Inverse:
+    async def run(stopping: asyncio.Event) -> None:
+        # Opened once everything has loaded, so every provider and agent type is on offer.
+        if not await ctx.get(APPLICATION).started():
+            return
+        address = ctx.get(SERVER_ADDRESS).replace("http://", "ws://", 1)
+        app = ChatApp(f"{address}{config.path}", providers=ctx.get(PROVIDERS).names(),
+                      agent_types=ctx.get(AGENT_TYPES).names(), provider=config.provider,
+                      model_name=config.model_name, agent_type=config.agent_type)
+        running = asyncio.ensure_future(app.run_async())
+        ending = asyncio.ensure_future(stopping.wait())
+        try:
+            await asyncio.wait({running, ending}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            ending.cancel()
+        if not running.done():
+            # The application is ending for some other reason, such as a signal: close the app, and give the
+            # terminal back.
+            app.exit()
+        await running
+        ctx.get(APPLICATION).end(0)
 
-    return Component("tui", apply=apply, requires=(APPLICATION, SERVER_ADDRESS, PROVIDERS, AGENT_TYPES))
+    return background(ctx, "terminal client", run)
+
+# A terminal client for the chat route, run once the application has started, offering the providers and agent types
+# the server has. It talks to the server over a websocket like any other client; quitting it ends the application. It
+# requires the server's address, so it closes before the server stops.
+tui = Component("tui", _tui, config=TuiConfig, requires=(APPLICATION, SERVER_ADDRESS, PROVIDERS, AGENT_TYPES))

@@ -6,8 +6,9 @@ from bot.contracts import CHANNEL
 from cordis import Runtime, open_runtime
 from cordis_loader import Entry, Loader
 
-# A bot whose configuration changes while it runs. Each change goes through the loader, which rebuilds only what the
-# change reaches; the transcript shows the components unloading and loading around the conversation.
+# A bot whose configuration changes while it runs. Each change goes through the loader, which changes only what the
+# change reaches, and only as much as it must: the greeter takes a new greeting in place, and the counter, disabled and
+# enabled, unloads and loads again around the conversation, as the transcript shows.
 
 def configuration(lines: list[str], greeting: str = "hello", counting: bool = True) -> list[Entry]:
     components = "bot.components"
@@ -36,7 +37,7 @@ async def run(describe_only: bool = False) -> list[str]:
         await runtime.settled()
         await say(runtime, "ada", "hi")
         await say(runtime, "ada", "count")
-        # The greeter is revised with a new greeting; the counter is disabled, then brought back.
+        # The greeter takes a new greeting in place; the counter is disabled, then brought back.
         await loader.load(configuration(lines, greeting="hey", counting=False))
         await runtime.settled()
         await say(runtime, "grace", "hi")

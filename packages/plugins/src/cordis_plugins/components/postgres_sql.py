@@ -161,39 +161,38 @@ async def _transaction(connection: _Connection, lock: asyncio.Lock) -> AsyncGene
     async with lock:
         await _refused_as_sql_errors(transaction.commit())
 
-def postgres_sql() -> Component:
-    # The SQL contract over a Postgres pool. Each statement outside a transaction takes a connection for itself, and
-    # each transaction holds one until it ends, so transactions run side by side, each seeing only what is committed.
-    def apply(ctx: Context) -> Inverse:
-        pool = ctx.get(POSTGRES)
-        # The tasks holding a transaction, refused the pool's own statements as the contract says: on a database
-        # with one connection, they would wait for themselves forever.
-        holding: set[asyncio.Task[Any]] = set()
+def _postgres_sql(ctx: Context) -> Inverse:
+    pool = ctx.get(POSTGRES)
+    # The tasks holding a transaction, refused the pool's own statements as the contract says: on a database
+    # with one connection, they would wait for themselves forever.
+    holding: set[asyncio.Task[Any]] = set()
 
-        def refuse_holders() -> None:
-            if asyncio.current_task() in holding:
-                raise RuntimeError("this task holds a transaction, so it runs its statements through the transaction's "
-                                   "Sql; on a database with one connection, the database's own would wait forever")
+    def refuse_holders() -> None:
+        if asyncio.current_task() in holding:
+            raise RuntimeError("this task holds a transaction, so it runs its statements through the transaction's "
+                               "Sql; on a database with one connection, the database's own would wait forever")
 
-        @asynccontextmanager
-        async def from_pool() -> AsyncGenerator[_Connection, None]:
-            refuse_holders()
-            async with pool.acquire() as connection:
-                yield connection
+    @asynccontextmanager
+    async def from_pool() -> AsyncGenerator[_Connection, None]:
+        refuse_holders()
+        async with pool.acquire() as connection:
+            yield connection
 
-        @asynccontextmanager
-        async def transaction() -> AsyncGenerator[Sql, None]:
-            refuse_holders()
-            task = asyncio.current_task()
-            assert task is not None
-            async with pool.acquire() as connection:
-                holding.add(task)
-                try:
-                    async with _transaction(connection, asyncio.Lock()) as sql:
-                        yield sql
-                finally:
-                    holding.discard(task)
+    @asynccontextmanager
+    async def transaction() -> AsyncGenerator[Sql, None]:
+        refuse_holders()
+        task = asyncio.current_task()
+        assert task is not None
+        async with pool.acquire() as connection:
+            holding.add(task)
+            try:
+                async with _transaction(connection, asyncio.Lock()) as sql:
+                    yield sql
+            finally:
+                holding.discard(task)
 
-        return ctx.provide(SQL, _sql(from_pool, transaction))
+    return ctx.provide(SQL, _sql(from_pool, transaction))
 
-    return Component("postgres sql", apply=apply, requires=(POSTGRES,), provides=(SQL,))
+# The SQL contract over a Postgres pool. Each statement outside a transaction takes a connection for itself, and
+# each transaction holds one until it ends, so transactions run side by side, each seeing only what is committed.
+postgres_sql = Component("postgres sql", _postgres_sql, requires=(POSTGRES,), provides=(SQL,))

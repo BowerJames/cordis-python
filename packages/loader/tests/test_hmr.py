@@ -22,18 +22,20 @@ def package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[s
         "from cordis import Component, Context, Inverse\n"
         "from .keys import GREETING\n"
         f"from {name}.text import TEXT\n"
-        "def greeter() -> Component:\n"
-        "    def apply(ctx: Context) -> Inverse:\n"
-        "        return ctx.provide(GREETING, TEXT)\n"
-        '    return Component("greeter", apply=apply, provides=(GREETING,))\n'
+        "def _greeter(ctx: Context) -> Inverse:\n"
+        "    return ctx.provide(GREETING, TEXT)\n"
+        'greeter = Component("greeter", _greeter, provides=(GREETING,))\n'
     )
     (root / "listener.py").write_text(
+        "from dataclasses import dataclass\n"
         "from cordis import Component, Context\n"
         "from . import keys\n"
-        "def listener(log: list[str]) -> Component:\n"
-        "    def apply(ctx: Context) -> None:\n"
-        "        log.append(ctx.get(keys.GREETING))\n"
-        '    return Component("listener", apply=apply, requires=(keys.GREETING,))\n'
+        "@dataclass\n"
+        "class Listening:\n"
+        "    log: list[str]\n"
+        "def _listener(ctx: Context, config: Listening) -> None:\n"
+        "    config.log.append(ctx.get(keys.GREETING))\n"
+        'listener = Component("listener", _listener, config=Listening, requires=(keys.GREETING,))\n'
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setattr(sys, "dont_write_bytecode", True)

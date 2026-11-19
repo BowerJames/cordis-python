@@ -6,7 +6,7 @@ DB: Key[str] = Key("db")
 GREET: Key[str] = Key("greet")
 URL: Key[str] = Key("url")
 
-def made(name: str, requires: tuple[Key[str], ...] = (), provides: tuple[Key[str], ...] = ()) -> Component:
+def made(name: str, requires: tuple[Key[str], ...] = (), provides: tuple[Key[str], ...] = ()) -> Component[None]:
     def apply(ctx: Context) -> Iterator[Inverse]:
         for key in provides:
             yield ctx.provide(key, name)

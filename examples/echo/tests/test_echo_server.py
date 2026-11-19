@@ -31,7 +31,7 @@ async def echo_server(steps: Steps, server: Server, *extra: Entry) -> tuple[int,
     # The composition as shipped, on a free port, with captured stdio, an HTTP client, and a scenario that talks to it.
     capture, captured = capturing_stdio()
     entries = patched(compose(port=0, server=server), Entry("stdio", capture), Entry("http", httpx_http),
-                      Entry("scenario", lambda: scenario(steps, requires=(HTTP, SERVER_ADDRESS))), *extra)
+                      Entry("scenario", scenario(steps, requires=(HTTP, SERVER_ADDRESS))), *extra)
     return await run(entries), captured
 
 
@@ -142,7 +142,7 @@ async def test_two_servers_kept_apart_each_answer_only_their_own_routes() -> Non
                   isolate={ROUTES: True, SERVER_ADDRESS: True})
     capture, _ = capturing_stdio()
     entries = [*(entry for entry in compose(port=0) if entry.id in ("stdio", "env", "routes", "server")), Entry("echo", echo), Entry("http", httpx_http),
-               Entry("scenario", lambda: scenario(steps, requires=(HTTP, SERVER_ADDRESS))), admin]
+               Entry("scenario", scenario(steps, requires=(HTTP, SERVER_ADDRESS))), admin]
     status = await run(patched(entries, Entry("stdio", capture)))
     assert status == 0
     assert seen == {"main health": 404, "admin health": 200, "main echo": 200, "admin echo": 404}

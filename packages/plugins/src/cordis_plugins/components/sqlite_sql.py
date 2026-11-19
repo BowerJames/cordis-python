@@ -76,17 +76,16 @@ async def _transaction(run: SqliteRun, depth: int) -> AsyncGenerator[Sql, None]:
         await roll_back()
         raise
 
-def sqlite_sql() -> Component:
-    # The SQL contract over a SQLite connection. A transaction holds the connection until it ends, so statements
-    # outside it wait, and only ever see it before it began or after it ended.
-    def apply(ctx: Context) -> Inverse:
-        database = ctx.get(SQLITE)
+def _sqlite_sql(ctx: Context) -> Inverse:
+    database = ctx.get(SQLITE)
 
-        @asynccontextmanager
-        async def transaction() -> AsyncGenerator[Sql, None]:
-            async with database.hold() as held, _transaction(held, 1) as sql:
-                yield sql
+    @asynccontextmanager
+    async def transaction() -> AsyncGenerator[Sql, None]:
+        async with database.hold() as held, _transaction(held, 1) as sql:
+            yield sql
 
-        return ctx.provide(SQL, _sql(database.run, transaction))
+    return ctx.provide(SQL, _sql(database.run, transaction))
 
-    return Component("sqlite sql", apply=apply, requires=(SQLITE,), provides=(SQL,))
+# The SQL contract over a SQLite connection. A transaction holds the connection until it ends, so statements
+# outside it wait, and only ever see it before it began or after it ended.
+sqlite_sql = Component("sqlite sql", _sqlite_sql, requires=(SQLITE,), provides=(SQL,))

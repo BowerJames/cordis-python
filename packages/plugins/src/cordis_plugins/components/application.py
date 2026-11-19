@@ -72,17 +72,19 @@ class ApplicationRun:
         self.failures.append((where, error))
         self.end(1)
 
-def application(run: ApplicationRun) -> Component:
+def application(run: ApplicationRun) -> Component[None]:
+    # The run is not configuration, which an entry could describe, but the runner's own handle on this one run: it is
+    # bound into the effect function, so each run's component is one of its own.
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(APPLICATION, Application(when_started=run.when_started, started=run.wait_started, end=run.end,
                                                     fail=run.fail, contain=run.contain))
-    return Component("application", apply=apply, provides=(APPLICATION,))
+    return Component("application", apply, provides=(APPLICATION,))
 
 APPLICATION_ENTRY = "application"
 
 def with_application(entries: Sequence[Entry], run: ApplicationRun) -> list[Entry]:
     # The entries an application runs: the one providing APPLICATION first, then the composition's own.
-    return [Entry(APPLICATION_ENTRY, lambda: application(run)), *entries]
+    return [Entry(APPLICATION_ENTRY, application(run)), *entries]
 
 def describe(entries: Sequence[Entry]) -> str:
     # How an application's entries fit together, as run_application would load them, without loading or running any.

@@ -1,4 +1,4 @@
-from .component import Apply, Component
+from .component import Apply, Component, Schema
 from .context import Context
 from .effect import Accumulator, Activation, Guard, Inverse, Undo, compose
 from .entries import Entries
@@ -39,6 +39,7 @@ __all__ = [
     "Realm",
     "RealmId",
     "Runtime",
+    "Schema",
     "UndeclaredAccess",
     "Undo",
     "UnyieldedInverse",

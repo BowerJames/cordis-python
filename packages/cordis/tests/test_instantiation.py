@@ -6,7 +6,7 @@ from .helpers import state
 
 JOBS: Key[list[str]] = Key("jobs")
 
-def nest(log: list[str], name: str, *children: Component) -> Component:
+def nest(log: list[str], name: str, *children: Component[None]) -> Component[None]:
     def apply(ctx: Context) -> Iterator[Inverse]:
         log.append(f"{name} up")
         yield lambda: log.append(f"{name} down")

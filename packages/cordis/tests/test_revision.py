@@ -4,13 +4,14 @@ from .helpers import state
 
 GREETING: Key[str] = Key("greeting")
 
-def greeter(text: str) -> Component:
-    # Configuration is bound into apply, so the same component given new text is a new component.
+def greeter(text: str) -> Component[None]:
+    # Configuration bound into apply by a function, which §4.4 allows: one such component bound to two payloads is two
+    # components, so revising swaps one for the other.
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(GREETING, text)
     return Component("greeter", apply=apply, provides=(GREETING,))
 
-def listener(log: list[str]) -> Component:
+def listener(log: list[str]) -> Component[None]:
     def apply(ctx: Context) -> Inverse:
         log.append(f"heard {ctx.get(GREETING)}")
         return lambda: log.append(f"stopped hearing {ctx.get(GREETING)}")
@@ -28,6 +29,21 @@ async def test_revising_a_provider_reactivates_its_dependents_against_the_new_on
     assert fiber.removed
     assert state(revised) is FiberState.ACTIVE
     assert revised.uid != fiber.uid
+
+async def test_revising_with_a_configuration_keeps_the_component(runtime: Runtime) -> None:
+    log: list[str] = []
+
+    def apply(ctx: Context, text: str) -> Inverse:
+        return ctx.provide(GREETING, text)
+
+    configured = Component("greeter", apply, config=str, provides=(GREETING,))
+    runtime.root.use(listener(log))
+    fiber = runtime.root.use(configured, "hello")
+    await runtime.settled()
+    revised = await fiber.revise(config="hi")
+    await runtime.settled()
+    assert log == ["heard hello", "stopped hearing hello", "heard hi"]
+    assert revised.component is configured and revised.config == "hi"
 
 async def test_a_failed_fiber_is_retried_by_revising_it(runtime: Runtime) -> None:
     attempts: list[str] = []

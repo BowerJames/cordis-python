@@ -8,7 +8,7 @@ from .helpers import state
 
 NUMBER: Key[int] = Key("number")
 
-def provider(value: int = 1, name: str = "provider") -> Component:
+def provider(value: int = 1, name: str = "provider") -> Component[None]:
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(NUMBER, value)
     return Component(name, apply=apply, provides=(NUMBER,))

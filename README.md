@@ -52,29 +52,36 @@ on, with the records bound at them. A project whose components keep only `cordis
 
 ```python
 import asyncio
+from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from cordis import Component, Context, Inverse, Key, open_runtime
 
 GREETING: Key[Callable[[], str]] = Key("greeting")
 
-def greeter() -> Component:
-    # Provides a key: a revertible effect, whose inverse it yields, withdrawn when the greeter unloads.
-    def apply(ctx: Context) -> Iterator[Inverse]:
-        yield ctx.provide(GREETING, lambda: "hello")
-    return Component("greeter", apply=apply, provides=(GREETING,))
+@dataclass(frozen=True)
+class Greeting:
+    text: str = "hello"
 
-def printer() -> Component:
+def _greeter(ctx: Context, config: Greeting) -> Iterator[Inverse]:
+    # Provides a key: a revertible effect, whose inverse it yields, withdrawn when the greeter unloads.
+    yield ctx.provide(GREETING, lambda: config.text)
+
+# Applied to the configuration its fiber is given (Algorithm 4); the schema builds and checks one from an entry's config.
+greeter = Component("greeter", _greeter, config=Greeting, provides=(GREETING,))
+
+def _printer(ctx: Context) -> Iterator[Inverse]:
     # Requires it: activates once it is provided, and reads it through its own teardown.
-    def apply(ctx: Context) -> Iterator[Inverse]:
-        print(ctx.get(GREETING)())
-        yield lambda: print(f"{ctx.get(GREETING)()}, and goodbye")
-    return Component("printer", apply=apply, requires=(GREETING,))
+    print(ctx.get(GREETING)())
+    yield lambda: print(f"{ctx.get(GREETING)()}, and goodbye")
+
+# A component with no configuration has no schema, and its effect function takes the context alone.
+printer = Component("printer", _printer, requires=(GREETING,))
 
 async def main() -> None:
     async with open_runtime() as runtime:
-        runtime.root.use(printer())   # inserted first, activates second
-        greeter_fiber = runtime.root.use(greeter())
+        runtime.root.use(printer)                           # inserted first, activates second
+        greeter_fiber = runtime.root.use(greeter, Greeting())
         await runtime.settled()
         await greeter_fiber.dispose()  # the printer unloads first, while the greeting is still there
 
@@ -114,9 +121,12 @@ providing (`L-Leave`), lets the printer unload while the greeting is still bound
 | `set(k, v)` (Def. 20) | `ctx.provide(key, value)`: performs the binding, and returns the `Undo` that withdraws it |
 | Provider function of metadata (Def. 26) | `ctx.provide_by(key, factory)` |
 | `isolate`, `intercept` (Defs. 25, 27) | `ctx.isolate(key, realm)`, `ctx.intercept(key, metadata)`: derived contexts |
-| Component `(d, p, e)` (Def. 48) | `Component(name, apply, requires, provides)` |
-| Fiber `⟨d, p, e, π, σ, τ, θ⟩` (Def. 49) | `Fiber`: `component`, `parent`, `table`, `retired`, `state`, with `committed` as `ω` |
-| `O-Insert` with instantiation (Def. 52) | `ctx.use(component)`, whose inverse is the child's `O-Retire`, `fiber.retire` |
+| Component `(d, p, e)` (Def. 48) | `Component(name, apply, config=schema, requires, provides)`: a value, the same for every configuration |
+| Fiber `⟨d, p, e, π, σ, τ, θ⟩` (Def. 49) | `Fiber`: `component`, `config`, `parent`, `table`, `retired`, `state`, with `committed` as `ω` |
+| `use(ctx, component, config)`, `fiber.apply` (Algorithm 4) | `ctx.use(component, config)`; each activation calls `apply(fiber.ctx, fiber.config)` |
+| `O-Insert` with instantiation (Def. 52) | `ctx.use(component, config)`, whose inverse is the child's `O-Retire`, `fiber.retire` |
+| A revision (§4.4, Configuration) | `fiber.revise(component, config)`: retire, remove, reinsert where the fiber stood |
+| `config` handed to the component (§5.2.1) | `fiber.update(config)`: taken in place when the fiber's acceptors (`ctx.accept`) take it, a revision otherwise |
 | `O-Retire`, `O-Remove` | `fiber.retire()`, the same `Undo`; removal is taken as soon as its premises hold |
 | `L-Begin`, `L-Iter`, `L-Finish`, `L-Divert`, `L-Leave`, `L-Unload` | `Runtime.refresh` and `Runtime._drive` |
 | Algorithm 6, proxy access | `ctx.get(key)`, checked against the declaring fiber's committed view |
@@ -124,7 +134,9 @@ providing (`L-Leave`), lets the printer unload while the greeting is still bound
 
 ## Configuration, and running the examples
 
-The loader keeps a tree of entries and the fibers realizing it in step:
+The loader keeps a tree of entries and the fibers realizing it in step. An entry names a component (Definition 81's
+url), and its `config` is what the component's schema builds the fiber's configuration from, checked as the entry
+loads, so a bad one fails that entry's fiber alone:
 
 ```python
 from cordis_loader import Entry, Loader
@@ -135,10 +147,37 @@ await loader.load([
     Entry("features", children=[Entry("greeter", "bot.components:greeter", config={"greeting": "hey"})]),
     Entry("tenant", children=[...], isolate={STORE: True}),
 ])
-print(loader.describe())          # how it fits together, building each component but running none
+print(loader.describe())          # how it fits together, building each configuration but running nothing
 await loader.load(changed)        # reconciles by id: only what the change reaches reloads
 await loader.reload(["bot.components.features"], source_imports(["bot"]))  # hot module replacement
 ```
+
+A change to an entry's config alone is handed to its fiber (`fiber.update`), and the component decides what it means
+(§5.2.1). By default it is a revision, so the fiber's dependents reactivate against the new one. A component that can
+take some changes in place says so with `ctx.accept`, yielding the undo as it does every effect's:
+
+```python
+def _greeter(ctx: Context, config: GreeterConfig) -> Iterator[Inverse]:
+    current = config
+
+    async def on_message(message: Message) -> None:
+        if message.text == "hi":
+            ctx.get(CHANNEL).say(f"{current.greeting}, {message.user}")
+
+    def accept(new: GreeterConfig) -> bool:
+        nonlocal current
+        current = new          # nothing done so far depended on the old greeting
+        return True
+
+    yield listen(ctx, MESSAGES, on_message)
+    yield ctx.accept(accept)
+```
+
+An acceptor answers to the same endpoint as the revision it saves (Theorem 80): it accepts only when the fiber now runs
+as one activated with the new configuration would, and the fiber keeps the configuration it took, so a later
+reactivation applies it. Chat accepts a new session template that way: each live session's loader is reconciled to it,
+the keyed diff a group applies, so a tool added to the template reaches every open session without a reconnect, while
+a new path, which is a new route, declines and is revised.
 
 ```sh
 uv sync
@@ -173,7 +212,7 @@ can be changed while the application runs, where the microkernel plans a fixed b
 | a capability introduced by one plugin | a key provided by one component |
 | a slot, contributed before boot and collected | a key whose value is a table, each addition its own entry, whose `Undo` its contributor yields (`RouteTable`, `Catalog`, `Arguments`, `Events`) |
 | adapting a capability (`verbose` wrapping the HTTP requester) | observing it: `HTTP.observe` is a registration of its own, so it needs no place in any order |
-| `server_cli` adapting the environment for the server | `server_cli` instantiating the server once the command line is parsed, with host and port bound into it |
+| `server_cli` adapting the environment for the server | `server_cli` instantiating the server once the command line is parsed, with host and port as its configuration |
 | services, `END`, `STARTED`, `kernel.run()` | `run_application(entries)`: a server binds and accepts as it activates and yields what closes it; `background(ctx, label, work)` runs a fiber's work, failing the fiber if it raises; `APPLICATION.end`, and `when_started` for emissions once the first load has quiesced; ending closes the runtime, which unloads dependents first |
 | a scope opened per websocket connection | a session group whose session keys are isolated into realms of its own; its failures are contained to it |
 
@@ -216,7 +255,10 @@ replace real modules written to a temporary package, including a failed import t
   nobody ever held.
 - Inverses run one at a time, newest first, as Theorem 16 has them; Cordis starts asynchronous disposers together.
 - A second provider of a key in a realm is refused when it is inserted (O-Insert's premise), not when it provides.
-- A failed fiber is not retried until it is revised (§4.4); `fiber.revise()` is that revision.
+- A failed fiber is not retried until it is revised (§4.4); `fiber.revise()` is that revision, as is
+  `fiber.update(config)` on a failed fiber.
+- A fiber resting inactive takes a new configuration as it stands, rather than by the composite revision §4.4 gives
+  every change of configuration: it has installed nothing and nothing has committed to it, so the endpoint is the same.
 - Hot module replacement invalidates only the modules on a way from an entry to a change, rather than the entry's
   whole import tree: a key's identity is the object its module made, and Python cannot re-make it equal.
 

@@ -21,7 +21,7 @@ from .helpers import state
 NUMBER: Key[int] = Key("number")
 OTHER: Key[int] = Key("other")
 
-def provider(value: int = 1, name: str = "provider", key: Key[int] = NUMBER) -> Component:
+def provider(value: int = 1, name: str = "provider", key: Key[int] = NUMBER) -> Component[None]:
     def apply(ctx: Context) -> Inverse:
         return ctx.provide(key, value)
     return Component(name, apply=apply, provides=(key,))

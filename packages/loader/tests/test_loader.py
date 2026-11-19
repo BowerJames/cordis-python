@@ -1,5 +1,7 @@
 import sys
 import types
+from dataclasses import dataclass
+from typing import Iterator
 
 import pytest
 
@@ -13,21 +15,29 @@ FILES: Key[str] = Key("files")
 def state(fiber: Fiber | None) -> FiberState | None:
     return None if fiber is None else fiber.state
 
-def storage(path: str = "app.db") -> Component:
-    def apply(ctx: Context) -> Inverse:
-        return ctx.provide(STORAGE, path)
-    return Component("storage", apply=apply, provides=(STORAGE,))
+@dataclass(frozen=True)
+class StorageConfig:
+    path: str = "app.db"
+
+def _storage(ctx: Context, config: StorageConfig) -> Inverse:
+    return ctx.provide(STORAGE, config.path)
+
+storage = Component("storage", _storage, config=StorageConfig, provides=(STORAGE,))
+
+@dataclass(frozen=True)
+class BotConfig:
+    name: str = "bot"
 
 class Log:
     # What the bots saw, by name, so a test can tell an entry that reloaded from one that did not.
     def __init__(self) -> None:
         self.lines: list[str] = []
 
-    def bot(self, name: str = "bot") -> Component:
-        def apply(ctx: Context) -> Inverse:
-            self.lines.append(f"{name} up on {ctx.get(STORAGE)}")
-            return lambda: self.lines.append(f"{name} down")
-        return Component(name, apply=apply, requires=(STORAGE,))
+        def apply(ctx: Context, config: BotConfig) -> Inverse:
+            self.lines.append(f"{config.name} up on {ctx.get(STORAGE)}")
+            return lambda: self.lines.append(f"{config.name} down")
+
+        self.bot = Component("bot", apply, config=BotConfig, requires=(STORAGE,))
 
 def configuration(log: Log, path: str = "app.db", bot_disabled: bool = False) -> list[Entry]:
     return [
@@ -44,7 +54,7 @@ async def test_loading_entries_needs_no_order(runtime: Runtime) -> None:
     assert log.lines == ["bot up on app.db"]
     assert state(loader.fiber("bot")) is FiberState.ACTIVE
 
-async def test_changing_an_entrys_config_rebuilds_that_entry_alone(runtime: Runtime) -> None:
+async def test_changing_an_entrys_config_revises_that_entry_alone(runtime: Runtime) -> None:
     log = Log()
     loader = Loader(runtime.root)
     await loader.load([*configuration(log), Entry("other", log.bot, config={"name": "other"})])
@@ -52,9 +62,60 @@ async def test_changing_an_entrys_config_rebuilds_that_entry_alone(runtime: Runt
     other = loader.fiber("other")
     await loader.load([*configuration(log, path="new.db"), Entry("other", log.bot, config={"name": "other"})])
     await runtime.settled()
-    # Both bots follow their dependency, which was rebuilt; the entry itself was untouched by the loader.
+    # Storage takes no configuration in place, so it was revised; both bots follow it, and the entry of the other was
+    # untouched by the loader.
     assert log.lines[-4:].count("bot up on new.db") == 1
     assert loader.fiber("other") is other
+
+async def test_a_config_the_fiber_accepts_is_taken_in_place(runtime: Runtime) -> None:
+    # Section 5.2.1: the new payload is handed to the component, which reloads only on a material change.
+    taken: list[str] = []
+
+    def apply(ctx: Context, config: StorageConfig) -> Iterator[Inverse]:
+        yield ctx.provide(STORAGE, "shared")
+
+        def accept(new: StorageConfig) -> bool:
+            taken.append(new.path)
+            return True
+
+        yield ctx.accept(accept)
+
+    tolerant = Component("tolerant storage", apply, config=StorageConfig, provides=(STORAGE,))
+    log = Log()
+    loader = Loader(runtime.root)
+    await loader.load([Entry("storage", tolerant, config={"path": "a.db"}), Entry("bot", log.bot)])
+    await runtime.settled()
+    before = loader.fiber("storage")
+    await loader.load([Entry("storage", tolerant, config={"path": "b.db"}), Entry("bot", log.bot)])
+    await runtime.settled()
+    assert loader.fiber("storage") is before
+    assert before is not None and before.config == StorageConfig("b.db")
+    assert taken == ["b.db"]
+    assert log.lines == ["bot up on shared"]
+
+async def test_a_config_the_schema_refuses_fails_its_entry_alone(runtime: Runtime, failures: Failures) -> None:
+    log = Log()
+    loader = Loader(runtime.root)
+    await loader.load([Entry("storage", storage, config={"colour": "red"}), Entry("other", log.bot)])
+    await runtime.settled()
+    assert state(loader.fiber("storage")) is FiberState.FAILED
+    assert "colour" in failures.reported[0][1]
+    # Corrected, it builds, and the bot waiting on it activates.
+    await loader.load([Entry("storage", storage, config={"path": "fixed.db"}), Entry("other", log.bot)])
+    await runtime.settled()
+    assert log.lines == ["bot up on fixed.db"]
+
+async def test_an_entry_must_name_a_component(runtime: Runtime, failures: Failures,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    module = types.ModuleType("fake_factories")
+    module.storage = lambda: storage  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "fake_factories", module)
+    loader = Loader(runtime.root)
+    await loader.load([Entry("storage", "fake_factories:storage")])
+    await runtime.settled()
+    assert state(loader.fiber("storage")) is FiberState.FAILED
+    assert failures.reported[0][1].startswith("fake_factories:storage is <function")
+    assert failures.reported[0][1].endswith("not a component")
 
 async def test_disabling_an_entry_unloads_it_and_enabling_brings_back_a_fresh_fiber(runtime: Runtime) -> None:
     log = Log()
@@ -135,14 +196,13 @@ async def test_interception_is_updated_in_place_without_a_reload(runtime: Runtim
             return "read-only" if metadata.get("readonly") else "read-write"
         return ctx.provide_by(FILES, serve)
 
-    def reader() -> Component:
-        def apply(ctx: Context) -> None:
-            loads.append(ctx.get(FILES))
-            readers.append(ctx)
-        return Component("reader", apply=apply, requires=(FILES,))
+    def read(ctx: Context) -> None:
+        loads.append(ctx.get(FILES))
+        readers.append(ctx)
 
-    def files_component() -> Component:
-        return Component("files", apply=files, provides=(FILES,))
+    # Made once: an entry naming another component, even one built the same way, is rebuilt.
+    files_component = Component("files", files, provides=(FILES,))
+    reader = Component("reader", read, requires=(FILES,))
 
     def config(readonly: bool) -> list[Entry]:
         return [
@@ -171,8 +231,8 @@ async def test_reconfiguring_ends_where_loading_from_scratch_would(failures: Fai
     # Theorem 80, through the loader: the quiescent state is a function of the final configuration alone.
     from cordis import open_runtime
 
-    def snapshot(runtime: Runtime) -> set[tuple[str, FiberState]]:
-        return {(fiber.name, fiber.state) for fiber in runtime.fibers()}
+    def snapshot(runtime: Runtime) -> set[tuple[str, object, FiberState]]:
+        return {(fiber.name, fiber.config, fiber.state) for fiber in runtime.fibers()}
 
     def config(log: Log, step: int) -> list[Entry]:
         return [

@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING, Any, Callable, Collection, Mapping, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Collection, Mapping, TypeVar, cast, overload
 
-from .component import Apply, Component
-from .effect import Inverse, Undo
+from .component import Component
+from .effect import Activation, Inverse, Undo
 from .errors import InactiveAccess, ProvisionError, UndeclaredAccess
 from .key import Key, Metadata, Realm, RealmId
 
@@ -9,6 +9,10 @@ if TYPE_CHECKING:
     from .runtime import Fiber, Runtime
 
 T = TypeVar("T")
+C = TypeVar("C")
+
+# Stands for a configuration not given to use, which then takes the defaults of the component's schema.
+_DEFAULTS: Any = object()
 
 class Context:
     # Γ∞ for one fiber: the only way a component touches anything shared (the context paradigm, Section 3.3). It
@@ -127,15 +131,35 @@ class Context:
         runtime.notify(realm)
         return undo
 
-    def use(self, component: Component) -> "Fiber":
-        # Instantiates component beneath this context's fiber (Definition 52). The child's O-Retire is the inverse
-        # of the instantiation, and it is the fiber's retire: yield it, and unloading this fiber retires the child.
-        return self.runtime.instantiate(self, component)
+    @overload
+    def use(self, component: Component[C], config: C) -> "Fiber": ...
 
-    def inject(self, keys: Collection[Key[Any]], apply: Apply, name: str | None = None) -> "Fiber":
+    @overload
+    def use(self, component: Component[Any]) -> "Fiber": ...
+
+    def use(self, component: Component[Any], config: Any = _DEFAULTS) -> "Fiber":
+        # Instantiates component beneath this context's fiber with config bound into its effect function (Definition
+        # 52, Algorithm 4); without one, with the defaults of its schema. The child's O-Retire is the inverse of the
+        # instantiation, and it is the fiber's retire: yield it, and unloading this fiber retires the child.
+        return self.runtime.instantiate(self, component, component.configure() if config is _DEFAULTS else config)
+
+    def inject(self, keys: Collection[Key[Any]], apply: Callable[["Context"], Activation],
+               name: str | None = None) -> "Fiber":
         # A child that requires keys and runs apply while they are provided: an optional dependency as a sub-fiber,
         # adding behaviour while the keys exist and withdrawing it when they leave. Yield its retire, as for use.
-        return self.use(Component(name or f"{self.fiber.name}/inject", apply=apply, requires=tuple(keys)))
+        return self.use(Component(name or f"{self.fiber.name}/inject", apply, requires=tuple(keys)))
+
+    def accept(self, handler: Callable[[C], bool | Awaitable[bool]]) -> Undo:
+        # Says how this fiber takes a new configuration while it is active (Section 5.2.1: the payload is handed to the
+        # component, which decides how to apply it). Fiber.update calls handler with the new configuration; returning
+        # True says the fiber now runs as one activated with it would, so nothing reloads, and returning False asks
+        # for the revision that is the default. Typically it diffs against the configuration it activated with, and
+        # accepts only what it can apply in place. Yield the undo: the handler is withdrawn as the fiber unloads.
+        fiber = self.fiber
+        self.runtime.check_effectful(fiber)
+        undo = fiber.acceptors.add(cast(Callable[[Any], bool | Awaitable[bool]], handler), "accept a configuration")
+        fiber.owe(undo)
+        return undo
 
     # --- derived contexts ----------------------------------------------------------------------------------------
 

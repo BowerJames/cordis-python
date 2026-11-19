@@ -63,7 +63,7 @@ def test_a_response_decodes_with_the_charset_it_declares() -> None:
     assert response.text() == "café"
     assert response.header("content-type") == "text/plain; charset=latin-1"
 
-def slow_route() -> Component:
+def slow_route() -> Component[None]:
     async def slow(request: ServerRequest) -> ServerResponse:
         await asyncio.sleep(1)
         return ServerResponse.text("late")
@@ -89,8 +89,8 @@ async def test_a_client_sends_headers_and_body_and_reads_the_whole_response(clie
         assert ("X-Sent", "yes") in response.sent.headers or ("x-sent", "yes") in response.sent.headers
 
     outcome = await run_scenario([
-        Entry("env", lambda: environment({})), Entry("routes", route_table),
-        Entry("server", asyncio_http_server, config={"port": 0}), Entry("http", client), Entry("app", slow_route),
+        Entry("env", environment), Entry("routes", route_table),
+        Entry("server", asyncio_http_server, config={"port": 0}), Entry("http", client), Entry("app", slow_route()),
     ], steps, requires=(HTTP, SERVER_ADDRESS))
     assert outcome.failures == ()
 
@@ -101,9 +101,9 @@ async def test_a_request_that_takes_longer_than_its_timeout_raises_http_timeout(
             await ctx.get(HTTP).send(Request("GET", f"{ctx.get(SERVER_ADDRESS)}/slow", timeout=0.05))
 
     outcome = await run_scenario([
-        Entry("env", lambda: environment({})), Entry("routes", route_table),
+        Entry("env", environment), Entry("routes", route_table),
         Entry("server", asyncio_http_server, config={"port": 0, "grace": 0.1}), Entry("http", client),
-        Entry("app", slow_route),
+        Entry("app", slow_route()),
     ], steps, requires=(HTTP, SERVER_ADDRESS))
     assert [error for _, error in outcome.failures if isinstance(error, HTTPError)] == []
 

@@ -40,10 +40,10 @@ class _LocalEvents:
         if failures:
             raise ExceptionGroup(f"handlers of {topic.name} failed", failures)
 
-def event_bus() -> Component:
-    # Delivers each event to the handlers subscribed to its topic. A subscriber yields its subscription's inverse, so
-    # a subscriber that unloads stops receiving, and one that loads later starts; there is nothing to declare up front.
-    def apply(ctx: Context) -> Inverse:
-        events = _LocalEvents()
-        return ctx.provide(EVENTS, Events(subscribe=events.subscribe, publish=events.publish))
-    return Component("event bus", apply=apply, provides=(EVENTS,))
+def _event_bus(ctx: Context) -> Inverse:
+    events = _LocalEvents()
+    return ctx.provide(EVENTS, Events(subscribe=events.subscribe, publish=events.publish))
+
+# Delivers each event to the handlers subscribed to its topic. A subscriber yields its subscription's inverse, so a
+# subscriber that unloads stops receiving, and one that loads later starts; there is nothing to declare up front.
+event_bus = Component("event bus", _event_bus, provides=(EVENTS,))

@@ -2,11 +2,14 @@ from .agents import explorer, reader
 from .harness import harness
 from .log import session_log
 from .models import model, openai_responses, zai_coding_plan
-from .route import chat
+from .route import ChatConfig, chat
 from .state import session_state
-from .tools import grep_tool, list_dir_tool, read_tool, workspace
+from .tools import ToolLimit, WorkspaceConfig, grep_tool, list_dir_tool, read_tool, workspace
 
 __all__ = [
+    "ChatConfig",
+    "ToolLimit",
+    "WorkspaceConfig",
     "chat",
     "explorer",
     "grep_tool",

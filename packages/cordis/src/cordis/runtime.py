@@ -1,12 +1,14 @@
 import asyncio
+import inspect
 import itertools
 import logging
 from contextlib import asynccontextmanager
 from enum import Enum
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Coroutine, Mapping
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Coroutine, Mapping
 
 from .component import Component
 from .effect import Accumulator, Inverse, Undo, execute, stepping, unowned
+from .entries import Entries
 from .errors import InactiveEffect, InsertionError, UnyieldedInverse
 from .key import Key, Metadata, RealmId
 
@@ -30,6 +32,9 @@ INSTALLED = frozenset({FiberState.LOADING, FiberState.ACTIVE, FiberState.UNLOADI
 SETTLED = frozenset({FiberState.INACTIVE, FiberState.FAILED})
 
 type ErrorHandler = Callable[["Fiber", Exception], None]
+# Stands for a configuration not given to a revision, which keeps the one the fiber has.
+_KEEP: Any = object()
+
 # A committed or target view: each declared key mapped to the fiber providing it.
 type View = Mapping[Key[Any], "Fiber"]
 
@@ -51,9 +56,11 @@ class Fiber:
     # One instantiation of a component: ⟨d, p, e, π, σ, τ, θ⟩ of Definition 49. Its uid is drawn fresh and never
     # reused, so a fiber that replaces another is never mistaken for it, even when both provide equal values.
     __slots__ = (
+        "acceptors",
         "accumulator",
         "committed",
         "component",
+        "config",
         "ctx",
         "error",
         "inertia",
@@ -74,14 +81,20 @@ class Fiber:
         self,
         runtime: "Runtime",
         uid: int,
-        component: Component,
+        component: Component[Any],
         parent: "Fiber | None",
         realms: Mapping[Key[Any], RealmId],
+        config: Any = None,
     ) -> None:
         from .context import Context
         self.runtime = runtime
         self.uid = uid
         self.component = component
+        # The payload bound into the effect function (Algorithm 4, line 9): every activation applies the component to
+        # the configuration the fiber holds as it begins, so one taken in place is the one a later reactivation reads.
+        self.config: Any = config
+        # How the fiber, while active, takes a new configuration without reloading (Context.accept).
+        self.acceptors: Entries[Callable[[Any], bool | Awaitable[bool]]] = Entries()
         self.parent = parent
         # Realms are fixed when the fiber is inserted (Section 4.4, Isolation): its interface does not move under it.
         self.realms: Mapping[Key[Any], RealmId] = dict(realms)
@@ -136,16 +149,51 @@ class Fiber:
         self.retire()
         await self.runtime.wait_for(lambda: self.removed)
 
-    async def revise(self, component: Component | None = None) -> "Fiber":
+    async def revise(self, component: Component[Any] | None = None, config: Any = _KEEP) -> "Fiber":
         # A revision (Section 4.4, Configuration): retire, let the lifecycle rules deactivate, remove, and reinsert
-        # where this fiber stood, with a new component or the same one. It is how a failed fiber is retried, and the
-        # new fiber is a new identity, so its dependents reactivate against it.
+        # where this fiber stood, with a new component or configuration, or the same ones. It is how a failed fiber
+        # is retried, and the new fiber is a new identity, so its dependents reactivate against it. A new component
+        # is given its own configuration, or its defaults.
         await self.dispose()
-        revised = self.origin.use(component if component is not None else self.component)
+        if component is None:
+            revised = self.origin.use(self.component, self.config if config is _KEEP else config)
+        else:
+            revised = self.origin.use(component, component.configure() if config is _KEEP else config)
         # A revision is the orchestrator's doing, with no effect function to yield from: the fiber it stands under
         # holds its retire from here.
         self.origin.adopt(revised.retire)
         return revised
+
+    async def update(self, config: Any) -> "Fiber":
+        # Hands the fiber a new configuration (Section 5.2.1), and gives back the fiber that runs with it: this one,
+        # when the configuration could be taken without a reload, or else the revision that reinserted it. Each route
+        # ends where a load of the new configuration from scratch would have (Theorem 80), and takes the shortest:
+        #   - an equal configuration changes nothing;
+        #   - a fiber resting inactive has installed nothing, so it takes the payload as it stands, and activates with
+        #     it once its dependencies are there;
+        #   - an active fiber whose every acceptor takes the payload goes on as it is (Context.accept);
+        #   - anything else, a fiber that failed or is in a transition included, is revised.
+        if config == self.config:
+            return self
+        if self.state is FiberState.INACTIVE and self.inertia is None and not self.retired:
+            self.config = config
+            return self
+        if self.state is FiberState.ACTIVE and self.inertia is None and not self.retired and len(self.acceptors):
+            previous, self.config = self.config, config
+            try:
+                for acceptor in self.acceptors:
+                    taken = acceptor(config)
+                    if inspect.isawaitable(taken):
+                        taken = await taken
+                    if not taken:
+                        break
+                else:
+                    return self
+            except Exception as error:  # noqa: BLE001 - an acceptor that fails asks for a revision, as declining does
+                self.runtime.report(self, error)
+            # Declined: the revision starts from the configuration the fiber ran with.
+            self.config = previous
+        return await self.revise(config=config)
 
     def __repr__(self) -> str:
         return f"Fiber({self.name!r}, uid={self.uid}, {self.state.value})"
@@ -245,7 +293,7 @@ class Runtime:
 
     # --- orchestration -------------------------------------------------------------------------------------------
 
-    def insert(self, component: Component, ctx: "Context") -> Fiber:
+    def insert(self, component: Component[Any], ctx: "Context", config: Any = None) -> Fiber:
         # O-Insert, under the fiber owning ctx. Its last premise is the single-source discipline: no realm gets a
         # second possible provider.
         parent = ctx.fiber
@@ -258,7 +306,7 @@ class Runtime:
                 raise InsertionError(
                     f"{component.name} provides {key.name}, which {other.name} already provides in the same realm"
                 )
-        fiber = Fiber(self, next(self._uids), component, parent, fixed)
+        fiber = Fiber(self, next(self._uids), component, parent, fixed, config)
         fiber.ctx = ctx.derive(fiber)
         fiber.origin = ctx
         self._fibers[fiber.uid] = fiber
@@ -267,12 +315,12 @@ class Runtime:
         self._signal()
         return fiber
 
-    def instantiate(self, ctx: "Context", component: Component) -> Fiber:
+    def instantiate(self, ctx: "Context", component: Component[Any], config: Any = None) -> Fiber:
         # Definition 52: an iteration of the parent that inserts a child, and yields the child's O-Retire as its
         # inverse. Retire rather than remove, because an inverse must apply wherever it is reached.
         parent = ctx.fiber
         self.check_effectful(parent)
-        fiber = self.insert(component, ctx)
+        fiber = self.insert(component, ctx, config)
         if parent is self.root_fiber:
             # The root is the orchestrator: it has no effect function to yield from, so it holds what it makes.
             parent.accumulator.push(fiber.retire)
@@ -432,7 +480,7 @@ class Runtime:
             if fiber.component.apply is not None:
                 # Calling the effect function is a step of its own: a plain function does all its work here.
                 with stepping(fiber.owe):
-                    activation = fiber.component.apply(fiber.ctx)
+                    activation = fiber.component.apply(fiber.ctx, fiber.config)
                 await execute(activation, fiber.accumulator, proceeding, yielded, fiber.owe)
         except Exception as error:  # noqa: BLE001 - any failure is reported; cancellation is a BaseException and passes
             fiber.error = error
